@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+*.sqlite3
+
+# Environment
+.env.local
+
+# Node
+node_modules/
+dist/
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Django
+/media/uploads/
+/course_eval/cache/
+/course_eval/media/
+
+# OS
+.DS_Store
+Thumbs.db
