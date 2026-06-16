@@ -1,15 +1,23 @@
 from rest_framework import serializers
 
-ALLOWED_EXTENSIONS = {'.xlsx', '.xls'}
+EXCEL_EXTENSIONS = {'.xlsx', '.xls'}
+WORD_EXTENSIONS = {'.docx', '.doc'}
+ALLOWED_EXTENSIONS = EXCEL_EXTENSIONS | WORD_EXTENSIONS
 MAX_FILE_SIZE_MB = 10
 MAX_FILE_COUNT = 10
 
 
-def validate_file_extension(name):
+def validate_file_extension(name, file_type=None):
     import os
     ext = os.path.splitext(name)[1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        raise serializers.ValidationError(f'Invalid file type "{name}". Only .xlsx and .xls are allowed.')
+    if file_type == 'syllabus':
+        allowed = WORD_EXTENSIONS
+        label = '.docx, .doc'
+    else:
+        allowed = EXCEL_EXTENSIONS
+        label = '.xlsx, .xls'
+    if ext not in allowed:
+        raise serializers.ValidationError(f'Invalid file type "{name}". Only {label} are allowed.')
     return name
 
 

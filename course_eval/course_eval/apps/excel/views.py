@@ -5,12 +5,17 @@ from datetime import datetime
 from django.conf import settings
 from django.core.cache import cache
 from django.core.paginator import Paginator
+from django.shortcuts import get_object_or_404
 
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser
 
 from course_eval.utils.response import api_response
-from .serializers import ExcelUploadSerializer
+from .models import Course, ClassGroup, Semester, CourseFileRecord
+from .serializers import (
+    ExcelUploadSerializer, CourseSerializer, ClassGroupSerializer,
+    SemesterSerializer, CourseFileRecordSerializer, CourseFileUploadSerializer,
+)
 from .validators import validate_file_extension, validate_file_size, validate_file_count
 from .parser import parse_excel
 from .cleaner import clean_and_fuse
@@ -144,3 +149,115 @@ class CleanedDataPreviewView(APIView):
             'page': page,
             'page_size': size,
         })
+
+
+# ── Course / ClassGroup / Semester ──────────────────────────────────────────
+
+class BaseUserListCreateView(APIView):
+    model = None
+    serializer_class = None
+
+    def get(self, request):
+        qs = self.model.objects.filter(user=request.user)
+        ser = self.serializer_class(qs, many=True)
+        return api_response(data=ser.data)
+
+    def post(self, request):
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            return api_response(code=400, msg='名称不能为空', http_status=400)
+        obj, created = self.model.objects.get_or_create(
+            name=name, user=request.user,
+        )
+        ser = self.serializer_class(obj)
+        return api_response(data=ser.data, msg='创建成功' if created else '已存在，已自动选择')
+
+
+class CourseListView(BaseUserListCreateView):
+    model = Course
+    serializer_class = CourseSerializer
+
+
+class ClassGroupListView(BaseUserListCreateView):
+    model = ClassGroup
+    serializer_class = ClassGroupSerializer
+
+
+class SemesterListView(BaseUserListCreateView):
+    model = Semester
+    serializer_class = SemesterSerializer
+
+
+# ── Course files ────────────────────────────────────────────────────────────
+
+class CourseFileUploadView(APIView):
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        ser = CourseFileUploadSerializer(data=request.data)
+        if not ser.is_valid():
+            return api_response(code=400, msg=ser.errors, http_status=400)
+
+        data = ser.validated_data
+        course = get_object_or_404(Course, id=data['course_id'], user=request.user)
+        class_group = get_object_or_404(ClassGroup, id=data['class_id'], user=request.user)
+        semester = get_object_or_404(Semester, id=data['semester_id'], user=request.user)
+
+        f = data['file']
+        validate_file_extension(f.name, file_type=data['file_type'])
+        validate_file_size(f.size)
+
+        upload_dir = os.path.join(
+            settings.MEDIA_ROOT, 'course_files',
+            request.user.username,
+            str(course.id), str(class_group.id), str(semester.id),
+        )
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, f.name)
+        with open(file_path, 'wb+') as dest:
+            for chunk in f.chunks():
+                dest.write(chunk)
+
+        record, created = CourseFileRecord.objects.update_or_create(
+            course=course,
+            class_group=class_group,
+            semester=semester,
+            file_type=data['file_type'],
+            user=request.user,
+            defaults={
+                'file_name': f.name,
+                'file_path': os.path.relpath(file_path, settings.MEDIA_ROOT),
+                'file_size': f.size,
+            },
+        )
+
+        out = CourseFileRecordSerializer(record).data
+        return api_response(data=out, msg='覆盖上传成功' if not created else '上传成功')
+
+
+class CourseFileListView(APIView):
+    def get(self, request):
+        course_id = request.query_params.get('course_id')
+        class_id = request.query_params.get('class_id')
+        semester_id = request.query_params.get('semester_id')
+        if not all([course_id, class_id, semester_id]):
+            return api_response(code=400, msg='请提供 course_id, class_id, semester_id', http_status=400)
+
+        qs = CourseFileRecord.objects.filter(
+            user=request.user,
+            course_id=course_id,
+            class_group_id=class_id,
+            semester_id=semester_id,
+        )
+        ser = CourseFileRecordSerializer(qs, many=True)
+        return api_response(data=ser.data)
+
+
+class CourseFileDeleteView(APIView):
+    def delete(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        full_path = os.path.join(settings.MEDIA_ROOT, record.file_path)
+        if os.path.exists(full_path):
+            os.remove(full_path)
+        record.delete()
+        return api_response(msg='删除成功')

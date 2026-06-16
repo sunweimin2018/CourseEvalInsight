@@ -13,10 +13,10 @@ async function handleLogout() {
 </script>
 
 <template>
-  <el-container style="height: 100vh">
-    <el-aside width="220px" style="background: #304156">
+  <el-container style="height: 100%; min-height: 100vh; overflow: hidden">
+    <el-aside width="220px" style="background: #304156; overflow-y: auto; overflow-x: hidden">
       <div
-        style="height: 60px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: bold"
+        style="height: 60px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: bold; flex-shrink: 0"
       >
         CourseEvalInsight
       </div>
@@ -26,6 +26,7 @@ async function handleLogout() {
         text-color="#bfcbd9"
         active-text-color="#409eff"
         router
+        style="border-right: none"
       >
         <el-menu-item index="/dashboard">
           <el-icon><Monitor /></el-icon>
@@ -49,9 +50,9 @@ async function handleLogout() {
         </el-menu-item>
       </el-menu>
     </el-aside>
-    <el-container>
+    <el-container style="flex-direction: column; height: 100%">
       <el-header
-        style="display: flex; align-items: center; justify-content: flex-end; background: #fff; border-bottom: 1px solid #e6e6e6"
+        style="display: flex; align-items: center; justify-content: flex-end; background: #fff; border-bottom: 1px solid #e6e6e6; flex-shrink: 0; height: 60px"
       >
         <el-dropdown>
           <span style="cursor: pointer; display: flex; align-items: center; gap: 8px">
@@ -71,7 +72,7 @@ async function handleLogout() {
           </template>
         </el-dropdown>
       </el-header>
-      <el-main style="background: #f5f7fa">
+      <el-main style="background: #f5f7fa; overflow-y: auto; flex: 1">
         <router-view />
       </el-main>
     </el-container>
