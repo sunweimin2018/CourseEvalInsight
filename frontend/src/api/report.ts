@@ -32,7 +32,7 @@ export interface GradeStats {
 export interface ReportData {
   module_1_course_info: Record<string, unknown>
   module_2_objectives: string
-  module_3_evaluation_standards: string
+  module_3_evaluation_standards: string | Array<{ type: string; [key: string]: unknown }>
   module_4_evaluation_results: {
     grade_analysis: Record<string, GradeStats>
     score_columns: string[]
@@ -57,16 +57,22 @@ export function getReportPreview(id: number) {
   return request.get(`/report/preview/${id}/`)
 }
 
-export async function downloadReport(id: number, filename: string) {
-  const token = localStorage.getItem('access_token') || ''
+export async function downloadReport(id: number, filename: string, format: 'docx' | 'pdf' = 'docx') {
+  const token = localStorage.getItem('access_token')
+  const ext = format === 'pdf' ? '.pdf' : '.docx'
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
   const resp = await axios.get(`/api/v1/report/export/${id}/`, {
+    params: { export_format: format },
     responseType: 'blob',
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
   })
   const url = URL.createObjectURL(resp.data)
   const a = document.createElement('a')
   a.href = url
-  a.download = filename
+  a.download = filename.replace(/\.\w+$/, '') + ext
   a.click()
   URL.revokeObjectURL(url)
 }

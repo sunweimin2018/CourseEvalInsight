@@ -185,7 +185,11 @@ def generate_report(user_id, course_id, class_id, semester_name):
     if syllabus_file:
         full_path = os.path.join(settings.MEDIA_ROOT, syllabus_file.file_path)
         parsed = parse_docx(full_path)
-        syllabus_fields = extract_syllabus_fields(parsed['paragraphs'], parsed['tables'])
+        syllabus_fields = extract_syllabus_fields(
+            parsed['paragraphs'], parsed['tables'],
+            tables_rich=parsed.get('_tables_rich'),
+            body_elements=parsed.get('_body_elements'),
+        )
 
     # ── Module 1 supplement: student info stats ────────────────────────────
     student_stats = {}
@@ -198,6 +202,9 @@ def generate_report(user_id, course_id, class_id, semester_name):
     if grades_file:
         grades_data = get_effective_data(grades_file, user_id)
         grade_analysis = _analyze_grades(grades_data['headers'], grades_data['rows'])
+
+    # Raw table key-value data for full fidelity (includes checkbox states)
+    raw_table_kv = syllabus_fields.pop('_all_table_kv', {})
 
     # ── Assemble 5 modules ─────────────────────────────────────────────────
     report_data = {
@@ -218,6 +225,8 @@ def generate_report(user_id, course_id, class_id, semester_name):
             'male_count': student_stats.get('male', 0),
             'female_count': student_stats.get('female', 0),
             'class_distribution': student_stats.get('classes', []),
+            # Full raw table data (includes checkbox states for all fields)
+            'raw_table_kv': raw_table_kv,
         },
         'module_2_objectives': syllabus_fields.get('course_objectives', '未填写'),
         'module_3_evaluation_standards': syllabus_fields.get('evaluation_standards', '未填写'),

@@ -28,6 +28,13 @@ interface GradeStats {
   distribution: Record<string, { label: string; count: number }>
 }
 
+interface EvalBlock {
+  type: string
+  text?: string
+  num_cols?: number
+  grid?: Array<Array<{ text: string; colspan: number; rowspan: number } | null>>
+}
+
 const store = useExcelStore()
 
 const selection = ref<SelectionModel>({
@@ -100,14 +107,29 @@ async function loadExistingReport() {
   await loadPreview(existingReportId.value)
 }
 
-async function handleExport() {
+async function handleExport(format: 'docx' | 'pdf' = 'docx') {
   if (!existingReportId.value || !report.value) return
   try {
-    await downloadReport(existingReportId.value, report.value.report_name + '.docx')
+    await downloadReport(existingReportId.value, report.value.report_name, format)
     ElMessage.success('导出成功')
-  } catch {
-    ElMessage.error('导出失败')
+  } catch (err: unknown) {
+    let message = '导出失败'
+    const axiosErr = err as { response?: { status: number; data: Blob }; message?: string }
+    if (axiosErr.response?.data instanceof Blob && axiosErr.response.data.type.includes('json')) {
+      try {
+        const text = await axiosErr.response.data.text()
+        const parsed = JSON.parse(text)
+        message = parsed.msg || message
+      } catch { /* use default message */ }
+    } else if (axiosErr.message) {
+      message = axiosErr.message
+    }
+    ElMessage.error(message)
   }
+}
+
+function isBlocksList(val: unknown): val is Array<{ type: string; [key: string]: unknown }> {
+  return Array.isArray(val)
 }
 
 function distributionChartData(stats: GradeStats): EChartsOption | undefined {
@@ -194,10 +216,18 @@ const fileStatusText: Record<string, string> = {
         <el-button
           v-if="existingReportId"
           type="warning"
-          @click="handleExport"
+          @click="handleExport('docx')"
         >
           <el-icon style="margin-right: 6px"><Download /></el-icon>
           导出Word
+        </el-button>
+        <el-button
+          v-if="existingReportId"
+          type="danger"
+          @click="handleExport('pdf')"
+        >
+          <el-icon style="margin-right: 6px"><Download /></el-icon>
+          导出PDF
         </el-button>
         <router-link v-if="availableTypes.length > 0" to="/excel/preview">
           <el-button>
@@ -279,7 +309,34 @@ const fileStatusText: Record<string, string> = {
         <template #header>
           <span style="font-weight: 700">三、课程评价标准</span>
         </template>
-        <div style="white-space: pre-wrap; line-height: 1.8">{{ reportData.module_3_evaluation_standards }}</div>
+        <template v-if="isBlocksList(reportData.module_3_evaluation_standards)">
+          <div v-for="(block, bi) in (reportData.module_3_evaluation_standards as EvalBlock[])" :key="bi" style="margin-bottom: 12px">
+            <div v-if="block.type === 'paragraph'" style="white-space: pre-wrap; line-height: 1.8">
+              {{ block.text }}
+            </div>
+            <el-table
+              v-else-if="block.type === 'table'"
+              :data="block.grid"
+              border size="small"
+              style="width: 100%"
+            >
+              <el-table-column
+                v-for="(_, colIdx) in block.num_cols"
+                :key="colIdx"
+                :label="''"
+              >
+                <template #default="{ row, $index: rowIdx }">
+                  <template v-if="row[colIdx]">
+                    <span :style="{ fontWeight: rowIdx === 0 ? 'bold' : 'normal' }">
+                      {{ row[colIdx].text }}
+                    </span>
+                  </template>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
+        <div v-else style="white-space: pre-wrap; line-height: 1.8">{{ reportData.module_3_evaluation_standards }}</div>
       </el-card>
 
       <!-- Module 4: Evaluation Results -->

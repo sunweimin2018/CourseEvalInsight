@@ -285,13 +285,20 @@ class WordContentView(APIView):
         if 'error' in result:
             return api_response(code=400, msg=result['error'], http_status=400)
 
-        fields = extract_syllabus_fields(result['paragraphs'], result['tables'])
+        fields = extract_syllabus_fields(
+            result['paragraphs'], result['tables'],
+            tables_rich=result.get('_tables_rich'),
+            body_elements=result.get('_body_elements'),
+        )
 
-        return api_response(data={
+        # Don't expose internal _tables_rich via API
+        out = {
+            'paragraphs': result['paragraphs'],
+            'tables': result['tables'],
             'file_name': record.file_name,
-            **result,
             'fields': fields,
-        })
+        }
+        return api_response(data=out)
 
 
 # ── Data Preview – Excel working copy CRUD ──────────────────────────────────

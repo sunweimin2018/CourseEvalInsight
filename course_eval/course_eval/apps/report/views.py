@@ -5,6 +5,7 @@ from course_eval.utils.response import api_response
 from .models import ReportRecord
 from .serializers import ReportRecordSerializer, ReportGenerateSerializer
 from .report_engine import generate_report
+from .pdf_engine import generate_pdf
 
 
 class ReportGenerateView(APIView):
@@ -53,84 +54,173 @@ class ReportPreviewView(APIView):
 
 class ReportExportView(APIView):
     def get(self, request, pk):
+        report = ReportRecord.objects.filter(id=pk, user=request.user).first()
+        if not report:
+            return api_response(code=404, msg='报告不存在', http_status=404)
+
+        export_format = request.query_params.get('export_format', 'docx')
+
+        if export_format == 'pdf':
+            return self._export_pdf(report)
+        return self._export_docx(report)
+
+    def _export_docx(self, report):
         from django.http import FileResponse
         from docx import Document
         from docx.shared import Inches, Pt, Cm
         from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-        report = ReportRecord.objects.filter(id=pk, user=request.user).first()
-        if not report:
-            return api_response(code=404, msg='报告不存在', http_status=404)
-
         rd = report.report_data
         doc = Document()
+
+        # ── Set default font to 宋体 ──────────────────────────────────────
+        default_style = doc.styles['Normal']
+        default_style.font.name = '宋体'
+        default_style.font.size = Pt(12)
+
+        def _run_font(run, font_name='宋体', font_size=Pt(12)):
+            run.font.name = font_name
+            run.font.size = font_size
+            return run
+
+        def _set_cell(cell, text, bold=False):
+            cell.text = ''
+            run = cell.paragraphs[0].add_run(str(text))
+            _run_font(run)
+            if bold:
+                run.bold = True
 
         # Title
         title = doc.add_heading(report.report_name, level=0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in title.runs:
+            _run_font(run)
 
         # ── Module 1: Course Basic Info Table ──────────────────────────────
-        doc.add_heading('一、课程基本信息表', level=1)
+        h = doc.add_heading('一、课程基本信息表', level=1)
+        for run in h.runs:
+            _run_font(run)
         info = rd.get('module_1_course_info', {})
-        table = doc.add_table(rows=6, cols=4, style='Table Grid')
-        cells = [
+        table = doc.add_table(rows=7, cols=4, style='Table Grid')
+
+        # Row 0-4: standard two-pair rows
+        rows_data = [
             ['课程名称：', info.get('course_name', ''), '修课人数：', str(info.get('student_count', ''))],
             ['课程编号：', info.get('course_code', ''), '课序号：', str(info.get('course_seq', ''))],
             ['授课班级：', info.get('teaching_class', ''), '学时数：', str(info.get('total_hours', ''))],
             ['选用教材：', info.get('textbook', ''), '学分：', str(info.get('credits', ''))],
             ['开课院系：', info.get('department', ''), '授课教师：', str(info.get('teacher', ''))],
-            ['课程性质：', info.get('course_nature', ''), '课程类型：', str(info.get('course_type', ''))],
         ]
-        for r_idx, row_cells in enumerate(cells):
-            for c_idx, text in enumerate(row_cells):
-                cell = table.cell(r_idx, c_idx)
-                cell.text = text
+        for r_idx, (lbl1, val1, lbl2, val2) in enumerate(rows_data):
+            _set_cell(table.cell(r_idx, 0), lbl1, bold=True)
+            _set_cell(table.cell(r_idx, 1), val1)
+            _set_cell(table.cell(r_idx, 2), lbl2, bold=True)
+            _set_cell(table.cell(r_idx, 3), val2)
+
+        # Row 5: 课程性质 — cols 1-3 merged for the value
+        _set_cell(table.cell(5, 0), '课程性质：', bold=True)
+        table.cell(5, 1).merge(table.cell(5, 3))
+        _set_cell(table.cell(5, 1), info.get('course_nature', ''))
+
+        # Row 6: 课程类型 — cols 1-3 merged for the value
+        _set_cell(table.cell(6, 0), '课程类型：', bold=True)
+        table.cell(6, 1).merge(table.cell(6, 3))
+        _set_cell(table.cell(6, 1), info.get('course_type', ''))
 
         # ── Module 2: Course Objectives ────────────────────────────────────
-        doc.add_heading('二、课程目标', level=1)
-        doc.add_paragraph(rd.get('module_2_objectives', '未填写'))
+        h = doc.add_heading('二、课程目标', level=1)
+        for run in h.runs:
+            _run_font(run)
+        p = doc.add_paragraph(rd.get('module_2_objectives', '未填写'))
+        for run in p.runs:
+            _run_font(run)
 
         # ── Module 3: Evaluation Standards ─────────────────────────────────
-        doc.add_heading('三、课程评价标准', level=1)
-        doc.add_paragraph(rd.get('module_3_evaluation_standards', '未填写'))
+        h = doc.add_heading('三、课程评价标准', level=1)
+        for run in h.runs:
+            _run_font(run)
+        eval_data = rd.get('module_3_evaluation_standards', '未填写')
+        if isinstance(eval_data, list):
+            for block in eval_data:
+                if block['type'] == 'paragraph':
+                    p = doc.add_paragraph(block['text'])
+                    for run in p.runs:
+                        _run_font(run)
+                elif block['type'] == 'table':
+                    grid = block['grid']
+                    num_cols = block['num_cols']
+                    if not grid or num_cols == 0:
+                        continue
+                    num_rows = len(grid)
+                    tbl = doc.add_table(rows=num_rows, cols=num_cols, style='Table Grid')
+                    for r in range(num_rows):
+                        for c in range(num_cols):
+                            cell_data = grid[r][c]
+                            if cell_data is None:
+                                continue
+                            cell = tbl.cell(r, c)
+                            _set_cell(cell, cell_data['text'], bold=(r == 0))
+                            if cell_data['colspan'] > 1 or cell_data['rowspan'] > 1:
+                                end_r = r + cell_data['rowspan'] - 1
+                                end_c = c + cell_data['colspan'] - 1
+                                cell.merge(tbl.cell(end_r, end_c))
+        else:
+            p = doc.add_paragraph(eval_data)
+            for run in p.runs:
+                _run_font(run)
 
         # ── Module 4: Evaluation Results ───────────────────────────────────
-        doc.add_heading('四、课程评价结果', level=1)
+        h = doc.add_heading('四、课程评价结果', level=1)
+        for run in h.runs:
+            _run_font(run)
         eval_results = rd.get('module_4_evaluation_results', {})
         grade_analysis = eval_results.get('grade_analysis', {})
         if grade_analysis:
             for col_name, stats in grade_analysis.items():
-                doc.add_heading(col_name, level=2)
+                h2 = doc.add_heading(col_name, level=2)
+                for run in h2.runs:
+                    _run_font(run)
                 p = doc.add_paragraph()
-                p.add_run(f'参考人数：{stats["count"]}　　')
-                p.add_run(f'缺考人数：{stats["missing"]}　　')
-                p.add_run(f'最高分：{stats["max"]}　　')
-                p.add_run(f'最低分：{stats["min"]}　　')
-                p.add_run(f'平均分：{stats["avg"]}　　')
-                p.add_run(f'中位数：{stats["median"]}　　')
-                p.add_run(f'标准差：{stats["stdev"]}　　')
-                p.add_run(f'及格率：{stats["pass_rate"]}%')
+                for label, val in [
+                    ('参考人数：', stats['count']),
+                    ('缺考人数：', stats['missing']),
+                    ('最高分：', stats['max']),
+                    ('最低分：', stats['min']),
+                    ('平均分：', stats['avg']),
+                    ('中位数：', stats['median']),
+                    ('标准差：', stats['stdev']),
+                ]:
+                    _run_font(p.add_run(f'{label}{val}　　'))
+                _run_font(p.add_run(f'及格率：{stats["pass_rate"]}%'))
 
                 # Score distribution table
-                doc.add_paragraph('成绩分布：')
+                dp = doc.add_paragraph('成绩分布：')
+                for run in dp.runs:
+                    _run_font(run)
                 dist_table = doc.add_table(rows=1 + len(stats['distribution']), cols=3, style='Table Grid')
-                dist_table.cell(0, 0).text = '分数段'
-                dist_table.cell(0, 1).text = '人数'
-                dist_table.cell(0, 2).text = '占比'
+                _set_cell(dist_table.cell(0, 0), '分数段', bold=True)
+                _set_cell(dist_table.cell(0, 1), '人数', bold=True)
+                _set_cell(dist_table.cell(0, 2), '占比', bold=True)
                 dist_idx = 1
                 total = stats['count']
                 for key, dist in stats['distribution'].items():
-                    dist_table.cell(dist_idx, 0).text = dist['label']
-                    dist_table.cell(dist_idx, 1).text = str(dist['count'])
+                    _set_cell(dist_table.cell(dist_idx, 0), dist['label'])
+                    _set_cell(dist_table.cell(dist_idx, 1), str(dist['count']))
                     pct = round(dist['count'] / total * 100, 1) if total else 0
-                    dist_table.cell(dist_idx, 2).text = f'{pct}%'
+                    _set_cell(dist_table.cell(dist_idx, 2), f'{pct}%')
                     dist_idx += 1
         else:
-            doc.add_paragraph('暂无成绩数据')
+            p = doc.add_paragraph('暂无成绩数据')
+            for run in p.runs:
+                _run_font(run)
 
         # ── Module 5: Improvement Plan ─────────────────────────────────────
-        doc.add_heading('五、课程持续改进方案及措施', level=1)
-        doc.add_paragraph(rd.get('module_5_improvement_plan', '待后续版本实现'))
+        h = doc.add_heading('五、课程持续改进方案及措施', level=1)
+        for run in h.runs:
+            _run_font(run)
+        p = doc.add_paragraph(rd.get('module_5_improvement_plan', '待后续版本实现'))
+        for run in p.runs:
+            _run_font(run)
 
         from io import BytesIO
 
@@ -141,12 +231,26 @@ class ReportExportView(APIView):
         report.status = 'exported'
         report.save(update_fields=['status'])
 
-        response = FileResponse(
+        return FileResponse(
             buf,
             as_attachment=True,
             filename=f'{report.report_name}.docx',
         )
-        return response
+
+    def _export_pdf(self, report):
+        from django.http import FileResponse
+
+        buf = generate_pdf(report.report_name, report.report_data)
+
+        report.status = 'exported'
+        report.save(update_fields=['status'])
+
+        return FileResponse(
+            buf,
+            as_attachment=True,
+            filename=f'{report.report_name}.pdf',
+            content_type='application/pdf',
+        )
 
 
 class ReportListView(APIView):
