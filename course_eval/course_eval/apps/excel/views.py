@@ -19,6 +19,8 @@ from .serializers import (
 from .validators import validate_file_extension, validate_file_size, validate_file_count
 from .parser import parse_excel
 from .cleaner import clean_and_fuse
+from .word_parser import parse_docx, extract_syllabus_fields
+from . import data_handler
 
 
 def _cache_key(user_id, suffix):
@@ -201,7 +203,9 @@ class CourseFileUploadView(APIView):
         data = ser.validated_data
         course = get_object_or_404(Course, id=data['course_id'], user=request.user)
         class_group = get_object_or_404(ClassGroup, id=data['class_id'], user=request.user)
-        semester = get_object_or_404(Semester, id=data['semester_id'], user=request.user)
+        semester, _ = Semester.objects.get_or_create(
+            name=data['semester_name'], user=request.user,
+        )
 
         f = data['file']
         validate_file_extension(f.name, file_type=data['file_type'])
@@ -239,15 +243,17 @@ class CourseFileListView(APIView):
     def get(self, request):
         course_id = request.query_params.get('course_id')
         class_id = request.query_params.get('class_id')
-        semester_id = request.query_params.get('semester_id')
-        if not all([course_id, class_id, semester_id]):
-            return api_response(code=400, msg='请提供 course_id, class_id, semester_id', http_status=400)
+        semester_name = request.query_params.get('semester_name')
+        if not all([course_id, class_id, semester_name]):
+            return api_response(code=400, msg='请提供 course_id, class_id, semester_name', http_status=400)
+
+        semester = get_object_or_404(Semester, name=semester_name, user=request.user)
 
         qs = CourseFileRecord.objects.filter(
             user=request.user,
             course_id=course_id,
             class_group_id=class_id,
-            semester_id=semester_id,
+            semester_id=semester.id,
         )
         ser = CourseFileRecordSerializer(qs, many=True)
         return api_response(data=ser.data)
@@ -261,3 +267,137 @@ class CourseFileDeleteView(APIView):
             os.remove(full_path)
         record.delete()
         return api_response(msg='删除成功')
+
+
+# ── Data Preview – Word content ──────────────────────────────────────────────
+
+class WordContentView(APIView):
+    def get(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        if record.file_type != 'syllabus':
+            return api_response(code=400, msg='仅课程大纲文件支持此操作', http_status=400)
+
+        full_path = os.path.join(settings.MEDIA_ROOT, record.file_path)
+        if not os.path.exists(full_path):
+            return api_response(code=404, msg='文件不存在', http_status=404)
+
+        result = parse_docx(full_path)
+        if 'error' in result:
+            return api_response(code=400, msg=result['error'], http_status=400)
+
+        fields = extract_syllabus_fields(result['paragraphs'], result['tables'])
+
+        return api_response(data={
+            'file_name': record.file_name,
+            **result,
+            'fields': fields,
+        })
+
+
+# ── Data Preview – Excel working copy CRUD ──────────────────────────────────
+
+class OpenWorkingCopyView(APIView):
+    def post(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        try:
+            data = data_handler.open_working_copy(record, request.user.id)
+        except (ValueError, FileNotFoundError) as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+
+        return api_response(data={
+            'sheet_name': data['sheet_name'],
+            'headers': data['headers'],
+            'rows': data['rows'],
+            'total': len(data['rows']),
+            'page': 1,
+            'page_size': len(data['rows']),
+        })
+
+
+class WorkingDataView(APIView):
+    def get(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        page = int(request.query_params.get('page', 1))
+        size = int(request.query_params.get('size', 20))
+
+        try:
+            data = data_handler.get_working_data(record, request.user.id, page, size)
+        except FileNotFoundError:
+            return api_response(code=400, msg='请先打开文件', http_status=400)
+        except ValueError as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+
+        return api_response(data=data)
+
+
+class AddRowView(APIView):
+    def post(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        try:
+            result = data_handler.add_row(record, request.user.id, request.data)
+        except FileNotFoundError:
+            return api_response(code=400, msg='请先打开文件', http_status=400)
+
+        return api_response(data=result, msg='新增成功')
+
+
+class UpdateCellView(APIView):
+    def put(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        row_idx = request.data.get('row_idx')
+        col_name = request.data.get('col_name')
+        value = request.data.get('value')
+
+        if row_idx is None or col_name is None:
+            return api_response(code=400, msg='请提供 row_idx 和 col_name', http_status=400)
+
+        try:
+            result = data_handler.update_cell(
+                record, request.user.id, int(row_idx), col_name, value
+            )
+        except (FileNotFoundError, IndexError, ValueError) as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+
+        return api_response(data=result)
+
+
+class DeleteRowView(APIView):
+    def delete(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        row_idx = request.data.get('row_idx')
+        if row_idx is None:
+            return api_response(code=400, msg='请提供 row_idx', http_status=400)
+
+        try:
+            result = data_handler.delete_row(record, request.user.id, int(row_idx))
+        except (FileNotFoundError, IndexError) as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+
+        return api_response(data=result, msg='删除成功')
+
+
+class SaveSnapshotView(APIView):
+    def post(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        try:
+            result = data_handler.save_snapshot(record, request.user.id)
+        except FileNotFoundError:
+            return api_response(code=400, msg='请先打开文件', http_status=400)
+
+        return api_response(data=result, msg='保存成功')
+
+
+class ResetWorkingCopyView(APIView):
+    def post(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        try:
+            data = data_handler.reset_working_copy(record, request.user.id)
+        except (ValueError, FileNotFoundError) as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+
+        return api_response(data={
+            'sheet_name': data['sheet_name'],
+            'headers': data['headers'],
+            'rows': data['rows'],
+            'total': len(data['rows']),
+        }, msg='已重置为原始数据')

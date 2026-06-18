@@ -48,7 +48,7 @@ class LoginView(APIView):
             password=serializer.validated_data['password'],
         )
         if not user:
-            return api_response(code=401, msg='Invalid credentials', http_status=401)
+            return api_response(code=401, msg='用户名或密码错误', http_status=401)
 
         UserProfile.objects.get_or_create(user=user)
         tokens = _generate_tokens(user)

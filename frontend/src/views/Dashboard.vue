@@ -10,7 +10,7 @@ const auth = useAuthStore()
     <el-row :gutter="20">
       <el-col :span="8">
         <el-card shadow="hover">
-          <template #header>Upload Excel</template>
+          <template #header>Upload Files</template>
           <p style="color: #606266">Upload and parse multiple Excel files for analysis.</p>
           <el-button type="primary" @click="$router.push('/excel/upload')">Go Upload</el-button>
         </el-card>

@@ -1,150 +1,235 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useExcelStore } from '@/store/excel'
 import { ElMessage } from 'element-plus'
+import { Document, DataBoard, Edit } from '@element-plus/icons-vue'
+import CourseSelectors from '@/components/CourseSelectors.vue'
+import WordDocViewer from '@/components/WordDocViewer.vue'
+import ExcelDataEditor from '@/components/ExcelDataEditor.vue'
+import type { SelectionModel } from '@/components/CourseSelectors.vue'
+import type { CourseFileRecord } from '@/api/excel'
 
 const store = useExcelStore()
-const activeTab = ref('raw')
-const rawPage = ref(1)
-const cleanPage = ref(1)
-const pageSize = 20
-const rawTotal = ref(0)
-const cleanTotal = ref(0)
+
+const selection = ref<SelectionModel>({
+  courseId: null, classId: null, semesterName: null,
+})
+
+const selectedFileType = ref<'syllabus' | 'student_info' | 'grades' | null>(null)
 const loading = ref(false)
+const wordLoading = ref(false)
+const excelLoading = ref(false)
 
-async function loadRawData() {
-  loading.value = true
-  try {
-    const data = await store.fetchRawData(rawPage.value, pageSize) as unknown as {
-      headers: string[]
-      rows: Record<string, unknown>[]
-      total: number
+const editorPage = ref(1)
+const pageSize = 20
+
+const currentFile = computed<CourseFileRecord | null>(() => {
+  if (!selectedFileType.value) return null
+  return store.courseFiles.find(f => f.file_type === selectedFileType.value) || null
+})
+
+const availableTypes = computed(() => {
+  return store.courseFiles.map(f => f.file_type)
+})
+
+async function onSelectionChange() {
+  const s = selection.value
+  if (s.courseId && s.classId && s.semesterName) {
+    loading.value = true
+    try {
+      await store.fetchCourseFiles(s.courseId, s.classId, s.semesterName)
+    } finally {
+      loading.value = false
     }
-    rawTotal.value = data.total
-  } finally {
-    loading.value = false
+    selectedFileType.value = null
+    store.clearWordContent()
+    store.clearWorkingData()
+  } else {
+    store.courseFiles = []
+    selectedFileType.value = null
+    store.clearWordContent()
+    store.clearWorkingData()
   }
 }
 
-async function loadCleanedData() {
-  loading.value = true
-  try {
-    const data = await store.fetchCleanedData(cleanPage.value, pageSize) as unknown as {
-      headers: string[]
-      rows: Record<string, unknown>[]
-      total: number
+watch(selection, onSelectionChange, { deep: true })
+
+async function selectFileType(type: 'syllabus' | 'student_info' | 'grades') {
+  selectedFileType.value = type
+  const file = currentFile.value
+  if (!file) return
+
+  if (type === 'syllabus') {
+    wordLoading.value = true
+    store.clearWordContent()
+    try {
+      await store.fetchWordContent(file.id)
+    } catch {
+      ElMessage.error('获取文档内容失败')
+    } finally {
+      wordLoading.value = false
     }
-    cleanTotal.value = data.total
-  } finally {
-    loading.value = false
+  } else {
+    excelLoading.value = true
+    store.clearWorkingData()
+    try {
+      await store.openExcel(file.id)
+      editorPage.value = 1
+    } catch {
+      ElMessage.error('打开文件失败')
+    } finally {
+      excelLoading.value = false
+    }
   }
 }
 
-async function handleClean() {
-  loading.value = true
+async function handleCellUpdate(fileId: number, absRowIdx: number, colName: string, value: unknown) {
   try {
-    await store.runClean()
-    ElMessage.success('Data cleaning complete')
-    cleanPage.value = 1
-    await loadCleanedData()
-    activeTab.value = 'clean'
-  } finally {
-    loading.value = false
+    await store.updateDataCell(fileId, absRowIdx, colName, value)
+    await refreshExcelData(fileId)
+  } catch {
+    ElMessage.error('更新单元格失败')
   }
 }
 
-function onRawPageChange(page: number) {
-  rawPage.value = page
-  loadRawData()
+async function handleRowAdd(fileId: number, rowData: Record<string, string>) {
+  try {
+    await store.addDataRow(fileId, rowData)
+    await refreshExcelData(fileId)
+    ElMessage.success('新增成功')
+  } catch {
+    ElMessage.error('新增行失败')
+  }
 }
 
-function onCleanPageChange(page: number) {
-  cleanPage.value = page
-  loadCleanedData()
+async function handleRowDelete(fileId: number, absRowIdx: number) {
+  try {
+    await store.deleteDataRowAction(fileId, absRowIdx)
+    await refreshExcelData(fileId)
+    ElMessage.success('删除成功')
+  } catch {
+    ElMessage.error('删除行失败')
+  }
 }
 
-loadRawData()
+async function handleSave(fileId: number) {
+  try {
+    await store.saveChanges(fileId)
+    ElMessage.success('保存成功')
+  } catch {
+    ElMessage.error('保存失败')
+  }
+}
+
+async function handleReset(fileId: number) {
+  try {
+    await store.resetChanges(fileId)
+    editorPage.value = 1
+    ElMessage.success('已重置为原始数据')
+  } catch {
+    ElMessage.error('重置失败')
+  }
+}
+
+async function refreshExcelData(fileId: number) {
+  excelLoading.value = true
+  try {
+    await store.fetchWorkingData(fileId, editorPage.value, pageSize)
+  } finally {
+    excelLoading.value = false
+  }
+}
+
+async function onEditorPageChange(page: number) {
+  editorPage.value = page
+  const file = currentFile.value
+  if (file) {
+    await refreshExcelData(file.id)
+  }
+}
 </script>
 
 <template>
   <div>
-    <h2 style="margin-bottom: 20px">Data Preview</h2>
+    <h2 style="margin-bottom: 20px">数据预览</h2>
 
-    <el-card v-if="store.cleaningSummary" style="margin-bottom: 20px">
-      <template #header>Cleaning Summary</template>
-      <el-row :gutter="20">
-        <el-col :span="6">
-          <el-statistic title="Before" :value="store.cleaningSummary.total_rows_before" />
-        </el-col>
-        <el-col :span="6">
-          <el-statistic title="After" :value="store.cleaningSummary.total_rows_after" />
-        </el-col>
-        <el-col :span="6">
-          <el-statistic title="Duplicates Removed" :value="store.cleaningSummary.removed_duplicates" />
-        </el-col>
-        <el-col :span="6">
-          <el-statistic title="Outliers Removed" :value="store.cleaningSummary.removed_outliers" />
-        </el-col>
-      </el-row>
-    </el-card>
+    <!-- Selectors -->
+    <CourseSelectors v-model="selection" />
 
-    <el-card>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
-        <el-tabs v-model="activeTab" @tab-change="(t: string) => { if (t === 'raw') loadRawData(); else loadCleanedData() }">
-          <el-tab-pane label="Raw Data" name="raw" />
-          <el-tab-pane label="Cleaned Data" name="clean" />
-        </el-tabs>
-        <el-button type="warning" :loading="loading" @click="handleClean">Clean Data</el-button>
+    <!-- File type selection bar -->
+    <div
+      v-if="selection.courseId && selection.classId && selection.semesterName"
+      style="margin-bottom: 20px"
+    >
+      <el-card v-if="store.courseFiles.length === 0 && !loading">
+        <el-empty description="该课程/班级/学期下暂无已上传文件，请先在文件上传页面完成上传" />
+      </el-card>
+
+      <div v-if="store.courseFiles.length > 0" style="display: flex; gap: 12px; align-items: center">
+        <el-button
+          v-for="type in (['syllabus', 'student_info', 'grades'] as const)"
+          :key="type"
+          :type="selectedFileType === type ? 'primary' : 'default'"
+          :disabled="!availableTypes.includes(type)"
+          @click="selectFileType(type)"
+        >
+          <el-icon style="margin-right: 6px">
+            <Document v-if="type === 'syllabus'" />
+            <DataBoard v-else />
+          </el-icon>
+          {{ type === 'syllabus' ? '课程大纲' : type === 'student_info' ? '学生信息' : '成绩表' }}
+          <el-tag
+            v-if="availableTypes.includes(type)"
+            size="small"
+            :type="selectedFileType === type ? '' : 'info'"
+            style="margin-left: 8px"
+            effect="plain"
+          >
+            已上传
+          </el-tag>
+        </el-button>
+        <router-link
+          v-if="availableTypes.length === 3"
+          to="/report/generate"
+          style="margin-left: auto"
+        >
+          <el-button type="success">
+            <el-icon style="margin-right: 6px"><Edit /></el-icon>
+            生成报告
+          </el-button>
+        </router-link>
       </div>
+    </div>
 
-      <div v-if="activeTab === 'raw' && store.rawData">
-        <el-table :data="store.rawData.rows" border stripe v-loading="loading" max-height="500">
-          <el-table-column
-            v-for="h in store.rawData.headers"
-            :key="h"
-            :prop="h"
-            :label="h"
-            min-width="120"
-            show-overflow-tooltip
-          />
-        </el-table>
-        <el-pagination
-          v-if="rawTotal > pageSize"
-          style="margin-top: 16px; justify-content: center"
-          :current-page="rawPage"
-          :page-size="pageSize"
-          :total="rawTotal"
-          layout="prev, pager, next"
-          @current-change="onRawPageChange"
-        />
-      </div>
+    <el-empty
+      v-if="!selection.courseId || !selection.classId || !selection.semesterName"
+      description="请先在上方选择课程、班级和学期"
+    />
 
-      <div v-if="activeTab === 'clean' && store.cleanedData">
-        <el-table :data="store.cleanedData.rows" border stripe v-loading="loading" max-height="500">
-          <el-table-column
-            v-for="h in store.cleanedData.headers"
-            :key="h"
-            :prop="h"
-            :label="h"
-            min-width="120"
-            show-overflow-tooltip
-          />
-        </el-table>
-        <el-pagination
-          v-if="cleanTotal > pageSize"
-          style="margin-top: 16px; justify-content: center"
-          :current-page="cleanPage"
-          :page-size="pageSize"
-          :total="cleanTotal"
-          layout="prev, pager, next"
-          @current-change="onCleanPageChange"
-        />
-      </div>
+    <!-- Word Document Viewer -->
+    <WordDocViewer
+      v-if="selectedFileType === 'syllabus' && currentFile"
+      :content="store.wordContent"
+      :loading="wordLoading"
+    />
 
-      <el-empty
-        v-if="activeTab === 'clean' && !store.cleanedData"
-        description="No cleaned data yet. Click 'Clean Data' to start."
-      />
-    </el-card>
+    <!-- Excel Data Editor -->
+    <ExcelDataEditor
+      v-if="selectedFileType && selectedFileType !== 'syllabus' && currentFile"
+      :key="currentFile.id"
+      :data="store.workingData"
+      :file-id="currentFile.id"
+      :loading="excelLoading"
+      :has-unsaved-changes="store.hasUnsavedChanges"
+      :page="editorPage"
+      :page-size="pageSize"
+      @cell-update="handleCellUpdate"
+      @row-add="handleRowAdd"
+      @row-delete="handleRowDelete"
+      @save="handleSave"
+      @reset="handleReset"
+      @refresh="() => refreshExcelData(currentFile!.id)"
+      @page-change="onEditorPageChange"
+    />
   </div>
 </template>

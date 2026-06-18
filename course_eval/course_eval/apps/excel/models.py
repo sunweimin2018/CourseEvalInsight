@@ -77,3 +77,23 @@ class CourseFileRecord(models.Model):
         db_table = 'course_file_record'
         unique_together = [('course', 'class_group', 'semester', 'file_type', 'user')]
         ordering = ['file_type']
+
+
+class WorkbookSnapshot(models.Model):
+    """Persistent save of a user-modified working copy for report generation."""
+    source_file = models.ForeignKey(
+        CourseFileRecord, on_delete=models.CASCADE, related_name='snapshots'
+    )
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='workbook_snapshots')
+    headers = models.JSONField()
+    rows = models.JSONField()
+    row_count = models.IntegerField()
+    created_time = models.DateTimeField(auto_now_add=True)
+    is_latest = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'workbook_snapshot'
+        ordering = ['-created_time']
+        indexes = [
+            models.Index(fields=['source_file', 'is_latest']),
+        ]

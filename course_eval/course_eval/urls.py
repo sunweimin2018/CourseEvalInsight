@@ -7,6 +7,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/user/', include('course_eval.apps.user.urls')),
     path('api/v1/excel/', include('course_eval.apps.excel.urls')),
+    path('api/v1/report/', include('course_eval.apps.report.urls')),
 ]
 
 if settings.DEBUG:

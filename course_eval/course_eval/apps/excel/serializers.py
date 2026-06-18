@@ -43,7 +43,7 @@ class CourseFileRecordSerializer(serializers.ModelSerializer):
 class CourseFileUploadSerializer(serializers.Serializer):
     course_id = serializers.IntegerField()
     class_id = serializers.IntegerField()
-    semester_id = serializers.IntegerField()
+    semester_name = serializers.CharField()
     file_type = serializers.ChoiceField(choices=CourseFileRecord.FILE_TYPES)
     file = serializers.FileField()
 

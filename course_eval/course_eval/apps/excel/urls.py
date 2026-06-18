@@ -14,4 +14,14 @@ urlpatterns = [
     path('course-files/upload/', views.CourseFileUploadView.as_view(), name='course-file-upload'),
     path('course-files/', views.CourseFileListView.as_view(), name='course-file-list'),
     path('course-files/<int:pk>/', views.CourseFileDeleteView.as_view(), name='course-file-delete'),
+    # Data Preview – Word
+    path('course-files/<int:pk>/word-content/', views.WordContentView.as_view(), name='course-file-word-content'),
+    # Data Preview – Excel CRUD
+    path('course-files/<int:pk>/data/open/', views.OpenWorkingCopyView.as_view(), name='course-file-open'),
+    path('course-files/<int:pk>/data/', views.WorkingDataView.as_view(), name='course-file-data'),
+    path('course-files/<int:pk>/data/add-row/', views.AddRowView.as_view(), name='course-file-add-row'),
+    path('course-files/<int:pk>/data/update-cell/', views.UpdateCellView.as_view(), name='course-file-update-cell'),
+    path('course-files/<int:pk>/data/delete-row/', views.DeleteRowView.as_view(), name='course-file-delete-row'),
+    path('course-files/<int:pk>/data/save/', views.SaveSnapshotView.as_view(), name='course-file-save'),
+    path('course-files/<int:pk>/data/reset/', views.ResetWorkingCopyView.as_view(), name='course-file-reset'),
 ]

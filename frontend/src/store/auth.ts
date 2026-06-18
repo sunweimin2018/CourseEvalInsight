@@ -29,6 +29,8 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('access_token', data.access)
     localStorage.setItem('refresh_token', data.refresh)
     localStorage.setItem('userInfo', JSON.stringify(data.user))
+    // Clear excel store to prevent stale data from previous user
+    import('@/store/excel').then((m) => m.useExcelStore().clearAll())
   }
 
   async function register(username: string, password: string, phone?: string, email?: string) {

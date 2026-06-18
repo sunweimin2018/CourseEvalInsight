@@ -14,6 +14,8 @@ async function handleLogin() {
   try {
     await auth.login(form.value.username, form.value.password)
     router.push('/dashboard')
+  } catch {
+    // Error already shown by interceptor
   } finally {
     loading.value = false
   }

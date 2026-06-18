@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
-import { UserFilled, Monitor, Upload, View, SwitchButton, Setting, User } from '@element-plus/icons-vue'
+import { useExcelStore } from '@/store/excel'
+import { UserFilled, Monitor, Upload, View, SwitchButton, Setting, User, Document } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const auth = useAuthStore()
+const excelStore = useExcelStore()
 
 async function handleLogout() {
   await auth.logout()
+  excelStore.clearAll()
   router.push('/login')
 }
 </script>
@@ -34,11 +37,15 @@ async function handleLogout() {
         </el-menu-item>
         <el-menu-item index="/excel/upload">
           <el-icon><Upload /></el-icon>
-          <span>Upload Excel</span>
+          <span>Upload Files</span>
         </el-menu-item>
         <el-menu-item index="/excel/preview">
           <el-icon><View /></el-icon>
           <span>Data Preview</span>
+        </el-menu-item>
+        <el-menu-item index="/report/generate">
+          <el-icon><Document /></el-icon>
+          <span>Report Generation</span>
         </el-menu-item>
         <el-menu-item index="/user/center">
           <el-icon><User /></el-icon>

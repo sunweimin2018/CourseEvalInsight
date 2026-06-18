@@ -1,27 +1,17 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { useExcelStore } from '@/store/excel'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled, Delete } from '@element-plus/icons-vue'
 import type { UploadFile, UploadRawFile } from 'element-plus'
+import CourseSelectors from '@/components/CourseSelectors.vue'
+import type { SelectionModel } from '@/components/CourseSelectors.vue'
 
 const store = useExcelStore()
 
-// ── Dropdown options ────────────────────────────────────────────────────────
-const courseOptions = ref<{ id: number; name: string }[]>([])
-const classOptions = ref<{ id: number; name: string }[]>([])
-const semesterOptions = ref<{ id: number; name: string }[]>([])
-
-const selectedCourse = ref<number | null>(null)
-const selectedClass = ref<number | null>(null)
-const selectedSemester = ref<number | null>(null)
-
-// ── Add-new dialog ──────────────────────────────────────────────────────────
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const dialogInput = ref('')
-const dialogType = ref<'course' | 'class' | 'semester'>('course')
-const dialogLoading = ref(false)
+const selection = ref<SelectionModel>({
+  courseId: null, classId: null, semesterName: null,
+})
 
 // ── File upload state ───────────────────────────────────────────────────────
 const fileList = ref<Record<string, UploadFile[]>>({
@@ -66,82 +56,14 @@ function beforeUpload(file: UploadRawFile, fileType: string) {
   return true
 }
 
-// ── Data loading ────────────────────────────────────────────────────────────
-async function loadOptions() {
-  const [courses, classes, semesters] = await Promise.all([
-    store.fetchCourses(),
-    store.fetchClasses(),
-    store.fetchSemesters(),
-  ])
-  courseOptions.value = courses
-  classOptions.value = classes
-  semesterOptions.value = semesters
-}
-
 // ── Three-selector linkage ──────────────────────────────────────────────────
-watch([selectedCourse, selectedClass, selectedSemester], async ([c, cl, s]) => {
-  if (c && cl && s) {
-    store.selectedCourseId = c
-    store.selectedClassId = cl
-    store.selectedSemesterId = s
-    await store.fetchCourseFiles()
+watch(selection, async (s) => {
+  if (s.courseId && s.classId && s.semesterName) {
+    await store.fetchCourseFiles(s.courseId, s.classId, s.semesterName)
   } else {
     store.courseFiles = []
   }
-})
-
-// ── Add-new flow ────────────────────────────────────────────────────────────
-function openAddDialog(type: 'course' | 'class' | 'semester') {
-  dialogType.value = type
-  dialogInput.value = ''
-  const labels: Record<string, string> = { course: '课程名称', class: '班级', semester: '学期' }
-  dialogTitle.value = '添加新' + labels[type]
-  dialogVisible.value = true
-}
-
-function handleSelectChange(type: 'course' | 'class' | 'semester', value: unknown) {
-  if (value === '__add__') {
-    if (type === 'course') selectedCourse.value = null
-    else if (type === 'class') selectedClass.value = null
-    else selectedSemester.value = null
-    openAddDialog(type)
-  }
-}
-
-function onCourseChange(v: unknown) { handleSelectChange('course', v) }
-function onClassChange(v: unknown) { handleSelectChange('class', v) }
-function onSemesterChange(v: unknown) { handleSelectChange('semester', v) }
-
-async function confirmAdd() {
-  const name = dialogInput.value.trim()
-  if (!name) {
-    ElMessage.warning('名称不能为空')
-    return
-  }
-  dialogLoading.value = true
-  try {
-    let item: { id: number; name: string } | null = null
-    if (dialogType.value === 'course') {
-      item = await store.addCourse(name)
-      courseOptions.value = store.courses
-      selectedCourse.value = item.id
-    } else if (dialogType.value === 'class') {
-      item = await store.addClass(name)
-      classOptions.value = store.classes
-      selectedClass.value = item.id
-    } else {
-      item = await store.addSemester(name)
-      semesterOptions.value = store.semesters
-      selectedSemester.value = item.id
-    }
-    dialogVisible.value = false
-    ElMessage.success('添加成功')
-  } catch {
-    // error handled by interceptor
-  } finally {
-    dialogLoading.value = false
-  }
-}
+}, { deep: true })
 
 // ── File upload ─────────────────────────────────────────────────────────────
 async function handleUpload(fileType: string) {
@@ -150,14 +72,15 @@ async function handleUpload(fileType: string) {
     ElMessage.warning('请先选择文件')
     return
   }
-  if (!selectedCourse.value || !selectedClass.value || !selectedSemester.value) {
+  const s = selection.value
+  if (!s.courseId || !s.classId || !s.semesterName) {
     ElMessage.warning('请先选择课程、班级和学期')
     return
   }
   uploading.value[fileType] = true
   try {
     const file = files[0].raw!
-    await store.uploadOneCourseFile(fileType, file)
+    await store.uploadOneCourseFile(s.courseId, s.classId, s.semesterName, fileType, file)
     fileList.value[fileType] = []
     ElMessage.success('上传成功')
   } catch {
@@ -175,16 +98,15 @@ async function handleDelete(fileId: number) {
       confirmButtonText: '删除',
       cancelButtonText: '取消',
     })
-    await store.removeCourseFile(fileId)
+    const s = selection.value
+    await store.removeCourseFile(fileId, s.courseId!, s.classId!, s.semesterName!)
     ElMessage.success('删除成功')
-  } catch {
-    // cancelled or error
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message !== 'cancel') {
+      ElMessage.error('删除失败，请刷新页面后重试')
+    }
   }
 }
-
-onMounted(() => {
-  loadOptions()
-})
 </script>
 
 <template>
@@ -192,82 +114,10 @@ onMounted(() => {
     <h2 style="margin-bottom: 20px">文件上传</h2>
 
     <!-- Selectors -->
-    <el-card style="margin-bottom: 20px">
-      <el-row :gutter="16">
-        <el-col :span="8">
-          <div style="margin-bottom: 4px; font-weight: 500">课程名称</div>
-          <el-select
-            v-model="selectedCourse"
-            placeholder="选择课程"
-            style="width: 100%"
-            clearable
-            filterable
-            @change="onCourseChange"
-          >
-            <el-option
-              v-for="c in courseOptions"
-              :key="c.id"
-              :label="c.name"
-              :value="c.id"
-            >
-              {{ c.name }}
-            </el-option>
-            <el-option value="__add__" style="color: #409eff; font-weight: 500">
-              + 添加新课程
-            </el-option>
-          </el-select>
-        </el-col>
-        <el-col :span="8">
-          <div style="margin-bottom: 4px; font-weight: 500">班级</div>
-          <el-select
-            v-model="selectedClass"
-            placeholder="选择班级"
-            style="width: 100%"
-            clearable
-            filterable
-            @change="onClassChange"
-          >
-            <el-option
-              v-for="c in classOptions"
-              :key="c.id"
-              :label="c.name"
-              :value="c.id"
-            >
-              {{ c.name }}
-            </el-option>
-            <el-option value="__add__" style="color: #409eff; font-weight: 500">
-              + 添加新班级
-            </el-option>
-          </el-select>
-        </el-col>
-        <el-col :span="8">
-          <div style="margin-bottom: 4px; font-weight: 500">学期</div>
-          <el-select
-            v-model="selectedSemester"
-            placeholder="选择学期"
-            style="width: 100%"
-            clearable
-            filterable
-            @change="onSemesterChange"
-          >
-            <el-option
-              v-for="s in semesterOptions"
-              :key="s.id"
-              :label="s.name"
-              :value="s.id"
-            >
-              {{ s.name }}
-            </el-option>
-            <el-option value="__add__" style="color: #409eff; font-weight: 500">
-              + 添加新学期
-            </el-option>
-          </el-select>
-        </el-col>
-      </el-row>
-    </el-card>
+    <CourseSelectors v-model="selection" />
 
     <!-- Upload cards -->
-    <el-row v-if="selectedCourse && selectedClass && selectedSemester" :gutter="16" style="margin-bottom: 20px">
+    <el-row v-if="selection.courseId && selection.classId && selection.semesterName" :gutter="16" style="margin-bottom: 20px">
       <el-col v-for="ft in FILE_TYPES" :key="ft.key" :span="8">
         <el-card>
           <template #header>
@@ -317,7 +167,7 @@ onMounted(() => {
           </template>
         </el-table-column>
         <el-table-column prop="upload_time" label="上传时间" width="180" />
-        <el-table-column label="操作" width="100">
+        <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button
               type="danger"
@@ -331,19 +181,5 @@ onMounted(() => {
         </el-table-column>
       </el-table>
     </el-card>
-
-    <!-- Add dialog -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="400px" :close-on-click-modal="false">
-      <el-input
-        v-model="dialogInput"
-        :placeholder="'请输入' + dialogTitle.replace('添加新', '')"
-        maxlength="100"
-        @keyup.enter="confirmAdd"
-      />
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="dialogLoading" @click="confirmAdd">确定</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>

@@ -35,6 +35,11 @@ const routes = [
         component: () => import('@/views/DataPreview.vue'),
       },
       {
+        path: 'report/generate',
+        name: 'ReportGenerate',
+        component: () => import('@/views/ReportGenerate.vue'),
+      },
+      {
         path: 'user/center',
         name: 'UserCenter',
         component: () => import('@/views/UserCenter.vue'),

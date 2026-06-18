@@ -69,11 +69,11 @@ export interface CourseFileRecord {
   upload_time: string
 }
 
-export function uploadCourseFile(courseId: number, classId: number, semesterId: number, fileType: string, file: File) {
+export function uploadCourseFile(courseId: number, classId: number, semesterName: string, fileType: string, file: File) {
   const formData = new FormData()
   formData.append('course_id', String(courseId))
   formData.append('class_id', String(classId))
-  formData.append('semester_id', String(semesterId))
+  formData.append('semester_name', semesterName)
   formData.append('file_type', fileType)
   formData.append('file', file)
   return request.post('/excel/course-files/upload/', formData, {
@@ -81,12 +81,69 @@ export function uploadCourseFile(courseId: number, classId: number, semesterId: 
   })
 }
 
-export function getCourseFiles(courseId: number, classId: number, semesterId: number) {
+export function getCourseFiles(courseId: number, classId: number, semesterName: string) {
   return request.get('/excel/course-files/', {
-    params: { course_id: courseId, class_id: classId, semester_id: semesterId },
+    params: { course_id: courseId, class_id: classId, semester_name: semesterName },
   })
 }
 
 export function deleteCourseFile(id: number) {
   return request.delete(`/excel/course-files/${id}/`)
+}
+
+// ── Data Preview – Word ──────────────────────────────────────────────────────
+
+export interface WordContent {
+  file_name: string
+  paragraphs: { index: number; text: string; style: string }[]
+  tables: { index: number; headers: string[]; rows: string[][] }[]
+}
+
+export function getWordContent(fileId: number) {
+  return request.get(`/excel/course-files/${fileId}/word-content/`)
+}
+
+// ── Data Preview – Excel editing ─────────────────────────────────────────────
+
+export interface WorkingData {
+  sheet_name: string
+  headers: string[]
+  rows: Record<string, unknown>[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export function openExcelForEdit(fileId: number) {
+  return request.post(`/excel/course-files/${fileId}/data/open/`)
+}
+
+export function getWorkingData(fileId: number, page: number, size: number) {
+  return request.get(`/excel/course-files/${fileId}/data/`, { params: { page, size } })
+}
+
+export function addRow(fileId: number, rowData: Record<string, unknown>) {
+  return request.post(`/excel/course-files/${fileId}/data/add-row/`, rowData)
+}
+
+export function updateCell(fileId: number, rowIdx: number, colName: string, value: unknown) {
+  return request.put(`/excel/course-files/${fileId}/data/update-cell/`, {
+    row_idx: rowIdx,
+    col_name: colName,
+    value,
+  })
+}
+
+export function deleteDataRow(fileId: number, rowIdx: number) {
+  return request.delete(`/excel/course-files/${fileId}/data/delete-row/`, {
+    data: { row_idx: rowIdx },
+  })
+}
+
+export function saveWorkingCopy(fileId: number) {
+  return request.post(`/excel/course-files/${fileId}/data/save/`)
+}
+
+export function resetWorkingCopy(fileId: number) {
+  return request.post(`/excel/course-files/${fileId}/data/reset/`)
 }

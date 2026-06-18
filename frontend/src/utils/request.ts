@@ -38,6 +38,13 @@ request.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
 
+    // Login failures: show server message and reject — never try token refresh
+    if (originalRequest.url?.includes('/user/login/')) {
+      const msg = error.response?.data?.msg || 'Login failed'
+      ElMessage.error(msg)
+      return Promise.reject(new Error(msg))
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       const refresh = getRefreshToken()
       if (!refresh) {
@@ -90,8 +97,9 @@ request.interceptors.response.use(
       router.push('/login')
     }
 
-    ElMessage.error(error.message || 'Network error')
-    return Promise.reject(error)
+    const msg = error.response?.data?.msg || error.message || 'Network error'
+    ElMessage.error(msg)
+    return Promise.reject(new Error(msg))
   },
 )
 
