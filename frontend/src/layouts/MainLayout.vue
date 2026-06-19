@@ -43,9 +43,13 @@ async function handleLogout() {
           <el-icon><View /></el-icon>
           <span>Data Preview</span>
         </el-menu-item>
+        <el-menu-item index="/report/builder">
+          <el-icon><Document /></el-icon>
+          <span>Report Builder</span>
+        </el-menu-item>
         <el-menu-item index="/report/generate">
           <el-icon><Document /></el-icon>
-          <span>Report Generation</span>
+          <span>Report Preview</span>
         </el-menu-item>
         <el-menu-item index="/user/center">
           <el-icon><User /></el-icon>

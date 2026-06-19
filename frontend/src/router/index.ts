@@ -40,6 +40,11 @@ const routes = [
         component: () => import('@/views/ReportGenerate.vue'),
       },
       {
+        path: 'report/builder',
+        name: 'ReportBuilder',
+        component: () => import('@/views/ReportBuilder.vue'),
+      },
+      {
         path: 'user/center',
         name: 'UserCenter',
         component: () => import('@/views/UserCenter.vue'),

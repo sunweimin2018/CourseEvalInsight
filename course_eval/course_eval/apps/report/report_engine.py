@@ -169,6 +169,77 @@ def _analyze_student_info(headers, rows):
     }
 
 
+def _parse_syllabus(syllabus_file):
+    """Parse syllabus Word file and return extracted fields dict."""
+    if not syllabus_file:
+        return {}
+    full_path = os.path.join(settings.MEDIA_ROOT, syllabus_file.file_path)
+    parsed = parse_docx(full_path)
+    return extract_syllabus_fields(
+        parsed['paragraphs'], parsed['tables'],
+        tables_rich=parsed.get('_tables_rich'),
+        body_elements=parsed.get('_body_elements'),
+    )
+
+
+# ── Per-module generation functions ────────────────────────────────────────
+
+def generate_module_1(course, class_group, syllabus_fields, student_stats, raw_table_kv):
+    """Generate Module 1: Course Basic Information Table."""
+    return {
+        'course_name': syllabus_fields.get('course_name', course.name),
+        'course_code': syllabus_fields.get('course_code', '未填写'),
+        'teaching_class': syllabus_fields.get('teaching_class', class_group.name),
+        'student_count': student_stats.get('total', '未填写'),
+        'course_seq': syllabus_fields.get('course_seq', '未填写'),
+        'total_hours': syllabus_fields.get('total_hours', '未填写'),
+        'credits': syllabus_fields.get('credits', '未填写'),
+        'textbook': syllabus_fields.get('textbook', '未填写'),
+        'department': syllabus_fields.get('department', '未填写'),
+        'teacher': syllabus_fields.get('teacher', '未填写'),
+        'course_nature': syllabus_fields.get('course_nature', '未填写'),
+        'course_type': syllabus_fields.get('course_type', '未填写'),
+        'male_count': student_stats.get('male', 0),
+        'female_count': student_stats.get('female', 0),
+        'class_distribution': student_stats.get('classes', []),
+        'raw_table_kv': raw_table_kv,
+    }
+
+
+def generate_module_2(syllabus_fields):
+    """Generate Module 2: Course Objectives."""
+    return syllabus_fields.get('course_objectives', '未填写')
+
+
+def generate_module_3(syllabus_fields):
+    """Generate Module 3: Evaluation Standards."""
+    return syllabus_fields.get('evaluation_standards', '未填写')
+
+
+def generate_module_4(grades_file, user_id):
+    """Generate Module 4: Evaluation Results (grade analysis)."""
+    if not grades_file:
+        return {
+            'grade_analysis': {},
+            'score_columns': [],
+            'generated': False,
+        }
+    grades_data = get_effective_data(grades_file, user_id)
+    grade_analysis = _analyze_grades(grades_data['headers'], grades_data['rows'])
+    return {
+        'grade_analysis': grade_analysis,
+        'score_columns': list(grade_analysis.keys()),
+        'generated': bool(grade_analysis),
+    }
+
+
+def generate_module_5():
+    """Generate Module 5: Continuous Improvement Plan (editable template)."""
+    return '【课程目标达成情况】\n\n【教学过程中存在的问题】\n\n【持续改进措施】\n\n【责任人及时间节点】\n'
+
+
+# ── Full report orchestrator ────────────────────────────────────────────────
+
 def generate_report(user_id, course_id, class_id, semester_name):
     """Orchestrate full report generation and return the report data dict."""
 
@@ -180,62 +251,22 @@ def generate_report(user_id, course_id, class_id, semester_name):
     student_info_file = _find_file(course_id, class_id, semester, user_id, 'student_info')
     grades_file = _find_file(course_id, class_id, semester, user_id, 'grades')
 
-    # ── Module 1 & 2 & 3: Syllabus fields ──────────────────────────────────
-    syllabus_fields = {}
-    if syllabus_file:
-        full_path = os.path.join(settings.MEDIA_ROOT, syllabus_file.file_path)
-        parsed = parse_docx(full_path)
-        syllabus_fields = extract_syllabus_fields(
-            parsed['paragraphs'], parsed['tables'],
-            tables_rich=parsed.get('_tables_rich'),
-            body_elements=parsed.get('_body_elements'),
-        )
+    # Parse syllabus once
+    syllabus_fields = _parse_syllabus(syllabus_file)
+    raw_table_kv = syllabus_fields.pop('_all_table_kv', {})
 
-    # ── Module 1 supplement: student info stats ────────────────────────────
+    # Student info stats
     student_stats = {}
     if student_info_file:
         info_data = get_effective_data(student_info_file, user_id)
         student_stats = _analyze_student_info(info_data['headers'], info_data['rows'])
 
-    # ── Module 4: Grade analysis ───────────────────────────────────────────
-    grade_analysis = {}
-    if grades_file:
-        grades_data = get_effective_data(grades_file, user_id)
-        grade_analysis = _analyze_grades(grades_data['headers'], grades_data['rows'])
-
-    # Raw table key-value data for full fidelity (includes checkbox states)
-    raw_table_kv = syllabus_fields.pop('_all_table_kv', {})
-
-    # ── Assemble 5 modules ─────────────────────────────────────────────────
     report_data = {
-        'module_1_course_info': {
-            'course_name': syllabus_fields.get('course_name', course.name),
-            'course_code': syllabus_fields.get('course_code', '未填写'),
-            'teaching_class': syllabus_fields.get('teaching_class', class_group.name),
-            'student_count': student_stats.get('total', '未填写'),
-            'course_seq': syllabus_fields.get('course_seq', '未填写'),
-            'total_hours': syllabus_fields.get('total_hours', '未填写'),
-            'credits': syllabus_fields.get('credits', '未填写'),
-            'textbook': syllabus_fields.get('textbook', '未填写'),
-            'department': syllabus_fields.get('department', '未填写'),
-            'teacher': syllabus_fields.get('teacher', '未填写'),
-            'course_nature': syllabus_fields.get('course_nature', '未填写'),
-            'course_type': syllabus_fields.get('course_type', '未填写'),
-            # Extra statistics from student info
-            'male_count': student_stats.get('male', 0),
-            'female_count': student_stats.get('female', 0),
-            'class_distribution': student_stats.get('classes', []),
-            # Full raw table data (includes checkbox states for all fields)
-            'raw_table_kv': raw_table_kv,
-        },
-        'module_2_objectives': syllabus_fields.get('course_objectives', '未填写'),
-        'module_3_evaluation_standards': syllabus_fields.get('evaluation_standards', '未填写'),
-        'module_4_evaluation_results': {
-            'grade_analysis': grade_analysis,
-            'score_columns': list(grade_analysis.keys()),
-            'generated': bool(grade_analysis),
-        },
-        'module_5_improvement_plan': '待后续版本实现',
+        'module_1_course_info': generate_module_1(course, class_group, syllabus_fields, student_stats, raw_table_kv),
+        'module_2_objectives': generate_module_2(syllabus_fields),
+        'module_3_evaluation_standards': generate_module_3(syllabus_fields),
+        'module_4_evaluation_results': generate_module_4(grades_file, user_id),
+        'module_5_improvement_plan': generate_module_5(),
     }
 
     report_name = f'{course.name} {class_group.name} {semester.name} 成绩质量检测报告'

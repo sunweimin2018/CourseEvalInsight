@@ -10,6 +10,12 @@ class ReportRecord(models.Model):
         ('exported', '已导出'),
     ]
 
+    MODULE_STATUS = [
+        ('pending', '待生成'),
+        ('draft', '草稿'),
+        ('confirmed', '已确认'),
+    ]
+
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='reports')
     class_group = models.ForeignKey(ClassGroup, on_delete=models.CASCADE, related_name='reports')
     semester = models.ForeignKey(Semester, on_delete=models.CASCADE, related_name='reports')
@@ -32,6 +38,12 @@ class ReportRecord(models.Model):
     report_data = models.JSONField(default=dict)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     report_file_path = models.CharField(max_length=500, blank=True, default='')
+
+    module_1_status = models.CharField(max_length=20, default='pending', choices=MODULE_STATUS)
+    module_2_status = models.CharField(max_length=20, default='pending', choices=MODULE_STATUS)
+    module_3_status = models.CharField(max_length=20, default='pending', choices=MODULE_STATUS)
+    module_4_status = models.CharField(max_length=20, default='pending', choices=MODULE_STATUS)
+    module_5_status = models.CharField(max_length=20, default='pending', choices=MODULE_STATUS)
 
     created_time = models.DateTimeField(auto_now_add=True)
     updated_time = models.DateTimeField(auto_now=True)

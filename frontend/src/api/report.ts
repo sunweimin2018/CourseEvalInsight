@@ -82,3 +82,61 @@ export function getReports(courseId?: number, classId?: number, semesterName?: s
     params: { course_id: courseId, class_id: classId, semester_name: semesterName },
   })
 }
+
+// ── Per-module API functions ───────────────────────────────────────────────
+
+export function generateModule(reportId: number, moduleNum: number) {
+  return request.post(`/report/${reportId}/module/${moduleNum}/generate/`)
+}
+
+export function updateModule(reportId: number, moduleNum: number, data: unknown, confirmed = false) {
+  return request.put(`/report/${reportId}/module/${moduleNum}/update/`, {
+    module_key: `module_${moduleNum}_`,
+    data,
+    confirmed,
+  })
+}
+
+export async function exportModuleDocx(reportId: number, moduleNum: number, filename: string) {
+  const token = localStorage.getItem('access_token')
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  const resp = await axios.get(`/api/v1/report/${reportId}/module/${moduleNum}/export-docx/`, {
+    responseType: 'blob',
+    headers,
+  })
+  const url = URL.createObjectURL(resp.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename.replace(/\.\w+$/, '') + '.docx'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function mergeReport(reportId: number, filename: string, format: 'docx' | 'pdf' = 'docx') {
+  const token = localStorage.getItem('access_token')
+  const ext = format === 'pdf' ? '.pdf' : '.docx'
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  const resp = await axios.get(`/api/v1/report/${reportId}/merge/`, {
+    params: { export_format: format },
+    responseType: 'blob',
+    headers,
+  })
+  // Check for error response
+  if (resp.data instanceof Blob && resp.data.type.includes('json')) {
+    const text = await resp.data.text()
+    const parsed = JSON.parse(text)
+    throw new Error(parsed.msg || '合并导出失败')
+  }
+  const url = URL.createObjectURL(resp.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename.replace(/\.\w+$/, '') + ext
+  a.click()
+  URL.revokeObjectURL(url)
+}
