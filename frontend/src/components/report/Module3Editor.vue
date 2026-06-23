@@ -1,155 +1,216 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-
-interface TableCell {
-  text: string
-  colspan: number
-  rowspan: number
-}
+import { ref, watch, computed } from 'vue'
+import { Edit, Plus, Delete } from '@element-plus/icons-vue'
 
 interface EvalBlock {
   type: 'paragraph' | 'table'
   text?: string
   num_cols?: number
-  grid?: (TableCell | null)[][]
+  grid?: Array<Array<{ text: string; colspan: number; rowspan: number } | null>>
 }
 
 const props = defineProps<{
-  modelValue: EvalBlock[] | string | null
+  modelValue: unknown
   status: string
   loading: boolean
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: EvalBlock[] | string): void
-  (e: 'regenerate'): void
-  (e: 'save'): void
-  (e: 'confirm'): void
-  (e: 'export'): void
+  'update:modelValue': [value: unknown]
+  regenerate: []
+  save: []
+  confirm: []
+  export: []
 }>()
 
-const editingBlocks = ref<EvalBlock[]>([])
-const isLegacyText = ref(false)
-const legacyText = ref('')
+const readonly = computed(() => props.status === 'confirmed')
 
-watch(() => props.modelValue, (val) => {
-  if (Array.isArray(val)) {
-    editingBlocks.value = JSON.parse(JSON.stringify(val))
-    isLegacyText.value = false
-  } else if (typeof val === 'string' && val !== null) {
-    legacyText.value = val
-    isLegacyText.value = true
-  } else {
-    editingBlocks.value = []
-    isLegacyText.value = false
+const isLegacy = ref(false)
+const legacyText = ref('')
+const blocks = ref<EvalBlock[]>([])
+
+// ── Header cell detection & inline editing ──────────────────────────────────
+const editingHeaders = ref<Set<string>>(new Set())
+
+function headerKey(bi: number, ri: number, ci: number): string {
+  return `${bi}-${ri}-${ci}`
+}
+
+function isHeaderCell(ri: number, _ci: number, cell: { colspan: number; rowspan: number }): boolean {
+  return ri === 0 || cell.colspan > 1 || cell.rowspan > 1
+}
+
+function isEditingHeader(bi: number, ri: number, ci: number): boolean {
+  return editingHeaders.value.has(headerKey(bi, ri, ci))
+}
+
+function startEditHeader(bi: number, ri: number, ci: number) {
+  const next = new Set(editingHeaders.value)
+  next.add(headerKey(bi, ri, ci))
+  editingHeaders.value = next
+}
+
+function stopEditHeader(bi: number, ri: number, ci: number) {
+  const next = new Set(editingHeaders.value)
+  next.delete(headerKey(bi, ri, ci))
+  editingHeaders.value = next
+}
+
+watch(() => props.modelValue, (v) => {
+  if (!v) {
+    blocks.value = []
+    isLegacy.value = false
+    legacyText.value = ''
+    return
+  }
+  if (typeof v === 'string') {
+    isLegacy.value = true
+    legacyText.value = v
+  } else if (Array.isArray(v)) {
+    isLegacy.value = false
+    blocks.value = JSON.parse(JSON.stringify(v))
   }
 }, { immediate: true })
 
-function onParagraphChange(index: number, text: string) {
-  editingBlocks.value[index] = { ...editingBlocks.value[index], text }
-  emitUpdate()
+function emitBlocks() {
+  emit('update:modelValue', JSON.parse(JSON.stringify(blocks.value)))
 }
 
-function onTableCellChange(blockIdx: number, rowIdx: number, colIdx: number, text: string) {
-  const block = editingBlocks.value[blockIdx]
-  if (block.type === 'table' && block.grid) {
-    const cell = block.grid[rowIdx][colIdx]
-    if (cell) {
-      cell.text = text
-    }
+function updateParagraphText(idx: number, val: string) {
+  if (blocks.value[idx] && blocks.value[idx].type === 'paragraph') {
+    blocks.value[idx].text = val
+    emitBlocks()
   }
-  emitUpdate()
 }
 
-function onLegacyTextChange(text: string) {
-  legacyText.value = text
-  emit('update:modelValue', text)
+function updateCellText(blockIdx: number, rowIdx: number, colIdx: number, val: string) {
+  const block = blocks.value[blockIdx]
+  if (!block || !block.grid) return
+  const cell = block.grid[rowIdx][colIdx]
+  if (cell) {
+    cell.text = val
+    emitBlocks()
+  }
 }
 
-function emitUpdate() {
-  emit('update:modelValue', JSON.parse(JSON.stringify(editingBlocks.value)))
+function addParagraph() {
+  blocks.value.push({ type: 'paragraph', text: '' })
+  emitBlocks()
 }
 
-function hasContent(): boolean {
-  if (isLegacyText.value) return legacyText.value !== null
-  return editingBlocks.value.length > 0
+function addTable() {
+  blocks.value.push({ type: 'table', num_cols: 3, grid: [] })
+  emitBlocks()
+}
+
+function addTableRow(blockIdx: number) {
+  const block = blocks.value[blockIdx]
+  if (!block || block.type !== 'table') return
+  const cols = block.num_cols || 3
+  const row: Array<{ text: string; colspan: number; rowspan: number }> = []
+  for (let i = 0; i < cols; i++) {
+    row.push({ text: '', colspan: 1, rowspan: 1 })
+  }
+  if (!block.grid) block.grid = []
+  block.grid.push(row)
+  emitBlocks()
+}
+
+function removeBlock(idx: number) {
+  blocks.value.splice(idx, 1)
+  emitBlocks()
 }
 </script>
 
 <template>
-  <div v-loading="loading">
-    <el-alert
-      v-if="!hasContent() && modelValue === null"
-      title="尚未生成数据，请点击"生成模块"按钮"
-      type="info"
-      show-icon
-      :closable="false"
-      style="margin-bottom: 16px"
-    />
-
-    <!-- Legacy text mode -->
-    <template v-if="isLegacyText && modelValue !== null">
+  <div v-loading="loading" element-loading-text="生成中...">
+    <template v-if="isLegacy">
       <el-input
-        type="textarea"
         :model-value="legacyText"
-        @update:model-value="onLegacyTextChange"
-        :rows="12"
-        placeholder="请输入课程评价标准..."
+        type="textarea"
+        :rows="8"
+        :disabled="readonly"
+        @input="(v: string) => { legacyText = v; emit('update:modelValue', v) }"
       />
     </template>
-
-    <!-- Block-based editor -->
-    <template v-else-if="!isLegacyText && editingBlocks.length > 0">
-      <div v-for="(block, bi) in editingBlocks" :key="bi" style="margin-bottom: 16px">
-        <!-- Paragraph block -->
+    <template v-else>
+      <div v-for="(block, bi) in blocks" :key="bi" style="margin-bottom: 16px; border: 1px solid #ebeef5; border-radius: 4px; padding: 12px">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px">
+          <el-tag size="small">{{ block.type === 'paragraph' ? '段落' : '表格' }}</el-tag>
+          <el-button v-if="!readonly" size="small" type="danger" :icon="Delete" @click="removeBlock(bi)">删除</el-button>
+        </div>
         <template v-if="block.type === 'paragraph'">
           <el-input
-            type="textarea"
             :model-value="block.text"
-            @update:model-value="(v: string) => onParagraphChange(bi, v)"
+            type="textarea"
             :rows="4"
+            :disabled="readonly"
+            @input="(v: string) => updateParagraphText(bi, v)"
           />
         </template>
-
-        <!-- Table block -->
-        <template v-else-if="block.type === 'table' && block.grid && block.num_cols">
-          <el-table :data="block.grid" border size="small" style="width: 100%">
-            <el-table-column
-              v-for="(_, colIdx) in block.num_cols"
-              :key="colIdx"
-              :label="colIdx === 0 ? '列' + (colIdx + 1) : ''"
-            >
-              <template #default="{ row, $index: rowIdx }">
-                <template v-if="row[colIdx]">
-                  <el-input
-                    :model-value="row[colIdx].text"
-                    @update:model-value="(v: string) => onTableCellChange(bi, rowIdx, colIdx, v)"
-                    size="small"
-                    :style="{ fontWeight: rowIdx === 0 ? 'bold' : 'normal' }"
-                  />
+        <template v-else-if="block.type === 'table'">
+          <table style="border-collapse: collapse; width: 100%; margin-bottom: 8px">
+            <tbody>
+              <tr v-for="(row, ri) in block.grid" :key="ri">
+                <template v-for="(cell, ci) in row" :key="ci">
+                  <td
+                    v-if="cell"
+                    :colspan="cell.colspan"
+                    :rowspan="cell.rowspan"
+                    :style="{
+                      border: '1px solid #dcdfe6',
+                      padding: '6px 10px',
+                      verticalAlign: 'middle',
+                      textAlign: 'center',
+                    }"
+                  >
+                    <!-- Readonly mode: plain text -->
+                    <div v-if="readonly" style="min-height: 28px; line-height: 28px; text-align: center">{{ cell.text }}</div>
+                    <!-- Header cell in edit mode: tag, double-click to edit -->
+                    <template v-else-if="isHeaderCell(ri, ci, cell)">
+                      <span
+                        v-if="!isEditingHeader(bi, ri, ci)"
+                        @dblclick="startEditHeader(bi, ri, ci)"
+                        style="cursor: pointer; font-weight: 700; min-height: 28px; display: flex; align-items: center; justify-content: center"
+                      >{{ cell.text || ' ' }}</span>
+                      <el-input
+                        v-else
+                        :model-value="cell.text"
+                        size="small"
+                        input-style="text-align: center"
+                        @blur="stopEditHeader(bi, ri, ci)"
+                        @keyup.enter="stopEditHeader(bi, ri, ci)"
+                        @input="(v: string) => updateCellText(bi, ri, ci, v)"
+                      />
+                    </template>
+                    <!-- Regular cell: editable input -->
+                    <el-input
+                      v-else
+                      :model-value="cell.text"
+                      size="small"
+                      input-style="text-align: center"
+                      @input="(v: string) => updateCellText(bi, ri, ci, v)"
+                    />
+                  </td>
                 </template>
-              </template>
-            </el-table-column>
-          </el-table>
+              </tr>
+            </tbody>
+          </table>
+          <el-button v-if="!readonly" size="small" style="margin-top: 8px" @click="addTableRow(bi)">+ 添加行</el-button>
         </template>
       </div>
+      <div v-if="!readonly" style="margin-bottom: 12px; display: flex; gap: 8px">
+        <el-button size="small" :icon="Plus" @click="addParagraph">添加段落</el-button>
+        <el-button size="small" :icon="Plus" @click="addTable">添加表格</el-button>
+      </div>
     </template>
-
-    <div style="margin-top: 20px; display: flex; gap: 8px">
-      <el-button type="primary" :loading="loading" @click="emit('regenerate')">
-        {{ hasContent() ? '重新生成' : '生成模块' }}
+    <div style="margin-top: 12px; display: flex; gap: 8px">
+      <el-button :loading="loading" @click="emit('regenerate')">
+        <el-icon><Edit /></el-icon> 重新生成
       </el-button>
-      <el-button v-if="hasContent()" @click="emit('save')">保存草稿</el-button>
-      <el-button v-if="hasContent()" type="success" @click="emit('confirm')">
-        确认并导出Word
-      </el-button>
-      <el-tag v-if="status === 'confirmed'" type="success" size="large" style="margin-left: auto">
-        已确认
-      </el-tag>
-      <el-tag v-else-if="status === 'draft'" type="info" size="large" style="margin-left: auto">
-        草稿
-      </el-tag>
+      <el-button type="primary" :loading="loading" :disabled="status === 'confirmed'" @click="emit('save')">保存草稿</el-button>
+      <el-button type="success" :loading="loading" :disabled="status === 'confirmed'" @click="emit('confirm')">确认</el-button>
+      <el-button :loading="loading" @click="emit('export')">导出Word</el-button>
     </div>
   </div>
 </template>

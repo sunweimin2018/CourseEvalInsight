@@ -67,14 +67,22 @@ watch(selection, async (s) => {
         const r = reports[0]
         reportId.value = r.id
         reportName.value = r.report_name
-        // Load module statuses
         const m = r as Record<string, unknown>
         for (let i = 1; i <= 5; i++) {
           moduleStatuses.value[i] = (m[`module_${i}_status`] as string) || 'pending'
         }
+        // Load full report data so module editors display immediately
+        try {
+          const preview = await getReportPreview(r.id) as unknown as { report_data: ReportData }
+          reportData.value = preview.report_data
+        } catch { /* data load failed, user can regenerate */ }
+      } else {
+        // Auto-generate a new report when no existing one is found
+        await ensureReport(true)
       }
     } catch {
-      // no existing report
+      // no existing report — auto-generate silently
+      try { await ensureReport(true) } catch { /* generation failed */ }
     }
   } else {
     store.courseFiles = []
@@ -119,12 +127,12 @@ function stepStatus(num: number): 'wait' | 'process' | 'finish' | 'error' {
 
 // ── Actions ─────────────────────────────────────────────────────────────────
 
-async function ensureReport() {
+async function ensureReport(silent = false) {
   if (reportId.value) return true
 
   const s = selection.value
   if (!s.courseId || !s.classId || !s.semesterName) {
-    ElMessage.warning('请先选择课程、班级和学期')
+    if (!silent) ElMessage.warning('请先选择课程、班级和学期')
     return false
   }
 
@@ -145,19 +153,18 @@ async function ensureReport() {
         moduleStatuses.value[i] = 'draft'
       }
     }
-    ElMessage.success('报告初始化成功')
+    if (!silent) ElMessage.success('报告初始化成功')
     return true
   } catch {
-    ElMessage.error('报告初始化失败')
+    if (!silent) ElMessage.error('报告初始化失败')
     return false
   } finally {
     loading.value = false
   }
 }
 
-async function loadReport() {
-  if (!reportId.value) return
-  loading.value = true
+async function fetchReportData(): Promise<boolean> {
+  if (!reportId.value) return false
   try {
     const preview = await getReportPreview(reportId.value) as unknown as { report_data: ReportData }
     reportData.value = preview.report_data
@@ -165,8 +172,18 @@ async function loadReport() {
     for (let i = 1; i <= 5; i++) {
       moduleStatuses.value[i] = (p[`module_${i}_status`] as string) || 'pending'
     }
+    return true
   } catch {
-    ElMessage.error('加载报告失败')
+    return false
+  }
+}
+
+async function loadReport() {
+  if (!reportId.value) return
+  loading.value = true
+  try {
+    const ok = await fetchReportData()
+    if (!ok) ElMessage.error('加载报告失败')
   } finally {
     loading.value = false
   }
@@ -175,6 +192,11 @@ async function loadReport() {
 async function handleRegenerate(num: number) {
   const ok = await ensureReport()
   if (!ok || !reportId.value) return
+
+  if (!reportData.value && !(await fetchReportData())) {
+    ElMessage.error('加载报告数据失败')
+    return
+  }
 
   actionLoading.value = true
   try {
@@ -191,6 +213,10 @@ async function handleRegenerate(num: number) {
 
 async function handleSave(num: number) {
   if (!reportId.value) return
+  if (!reportData.value && !(await fetchReportData())) {
+    ElMessage.error('加载报告数据失败')
+    return
+  }
   const data = getModuleData(num)
   actionLoading.value = true
   try {
@@ -206,6 +232,10 @@ async function handleSave(num: number) {
 
 async function handleConfirm(num: number) {
   if (!reportId.value) return
+  if (!reportData.value && !(await fetchReportData())) {
+    ElMessage.error('加载报告数据失败')
+    return
+  }
   const data = getModuleData(num)
   actionLoading.value = true
   try {

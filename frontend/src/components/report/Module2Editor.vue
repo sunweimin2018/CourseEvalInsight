@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { ref, watch, computed } from 'vue'
+import { Edit } from '@element-plus/icons-vue'
+
 const props = defineProps<{
   modelValue: string | null
   status: string
@@ -6,53 +9,43 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: string): void
-  (e: 'regenerate'): void
-  (e: 'save'): void
-  (e: 'confirm'): void
-  (e: 'export'): void
+  'update:modelValue': [value: string]
+  regenerate: []
+  save: []
+  confirm: []
+  export: []
 }>()
 
-function onInput(val: string) {
-  emit('update:modelValue', val)
+const text = ref('')
+
+watch(() => props.modelValue, (v) => {
+  text.value = v ?? ''
+}, { immediate: true })
+
+function onInput() {
+  emit('update:modelValue', text.value)
 }
+
+const readonly = computed(() => props.status === 'confirmed')
 </script>
 
 <template>
-  <div v-loading="loading">
-    <el-alert
-      v-if="modelValue === null"
-      title="尚未生成数据，请点击"生成模块"按钮"
-      type="info"
-      show-icon
-      :closable="false"
-      style="margin-bottom: 16px"
-    />
-
+  <div v-loading="loading" element-loading-text="生成中...">
     <el-input
-      v-if="modelValue !== null"
+      :model-value="text"
       type="textarea"
-      :model-value="modelValue"
-      @update:model-value="onInput"
-      :rows="16"
-      placeholder="请输入课程目标..."
-      style="font-size: 14px; line-height: 1.8"
+      :rows="10"
+      :disabled="readonly"
+      placeholder="课程目标内容..."
+      @input="(v: string) => { text = v; onInput() }"
     />
-
-    <div style="margin-top: 20px; display: flex; gap: 8px">
-      <el-button type="primary" :loading="loading" @click="emit('regenerate')">
-        {{ modelValue !== null ? '重新生成' : '生成模块' }}
+    <div style="margin-top: 12px; display: flex; gap: 8px">
+      <el-button :loading="loading" @click="emit('regenerate')">
+        <el-icon><Edit /></el-icon> 重新生成
       </el-button>
-      <el-button v-if="modelValue !== null" @click="emit('save')">保存草稿</el-button>
-      <el-button v-if="modelValue !== null" type="success" @click="emit('confirm')">
-        确认并导出Word
-      </el-button>
-      <el-tag v-if="status === 'confirmed'" type="success" size="large" style="margin-left: auto">
-        已确认
-      </el-tag>
-      <el-tag v-else-if="status === 'draft'" type="info" size="large" style="margin-left: auto">
-        草稿
-      </el-tag>
+      <el-button type="primary" :loading="loading" :disabled="status === 'confirmed'" @click="emit('save')">保存草稿</el-button>
+      <el-button type="success" :loading="loading" :disabled="status === 'confirmed'" @click="emit('confirm')">确认</el-button>
+      <el-button :loading="loading" @click="emit('export')">导出Word</el-button>
     </div>
   </div>
 </template>

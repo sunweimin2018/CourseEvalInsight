@@ -247,7 +247,9 @@ class CourseFileListView(APIView):
         if not all([course_id, class_id, semester_name]):
             return api_response(code=400, msg='请提供 course_id, class_id, semester_name', http_status=400)
 
-        semester = get_object_or_404(Semester, name=semester_name, user=request.user)
+        semester = Semester.objects.filter(name=semester_name, user=request.user).first()
+        if not semester:
+            return api_response(data=[])
 
         qs = CourseFileRecord.objects.filter(
             user=request.user,

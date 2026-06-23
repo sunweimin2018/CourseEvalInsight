@@ -189,7 +189,7 @@ def generate_module_1(course, class_group, syllabus_fields, student_stats, raw_t
     return {
         'course_name': syllabus_fields.get('course_name', course.name),
         'course_code': syllabus_fields.get('course_code', '未填写'),
-        'teaching_class': syllabus_fields.get('teaching_class', class_group.name),
+        'teaching_class': '、'.join(student_stats.get('classes', [])) or syllabus_fields.get('teaching_class', class_group.name),
         'student_count': student_stats.get('total', '未填写'),
         'course_seq': syllabus_fields.get('course_seq', '未填写'),
         'total_hours': syllabus_fields.get('total_hours', '未填写'),

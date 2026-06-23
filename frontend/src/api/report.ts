@@ -89,9 +89,17 @@ export function generateModule(reportId: number, moduleNum: number) {
   return request.post(`/report/${reportId}/module/${moduleNum}/generate/`)
 }
 
+const MODULE_DATA_KEYS: Record<number, string> = {
+  1: 'module_1_course_info',
+  2: 'module_2_objectives',
+  3: 'module_3_evaluation_standards',
+  4: 'module_4_evaluation_results',
+  5: 'module_5_improvement_plan',
+}
+
 export function updateModule(reportId: number, moduleNum: number, data: unknown, confirmed = false) {
   return request.put(`/report/${reportId}/module/${moduleNum}/update/`, {
-    module_key: `module_${moduleNum}_`,
+    module_key: MODULE_DATA_KEYS[moduleNum],
     data,
     confirmed,
   })

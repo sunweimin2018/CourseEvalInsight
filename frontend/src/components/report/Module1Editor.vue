@@ -1,113 +1,73 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-
-interface Module1Data {
-  course_name: string
-  course_code: string
-  teaching_class: string
-  student_count: string | number
-  course_seq: string
-  total_hours: string
-  credits: string
-  textbook: string
-  department: string
-  teacher: string
-  course_nature: string
-  course_type: string
-  male_count?: number
-  female_count?: number
-  class_distribution?: string[]
-}
+import { ref, watch, computed } from 'vue'
+import { Edit } from '@element-plus/icons-vue'
 
 const props = defineProps<{
-  modelValue: Module1Data | null
+  modelValue: Record<string, unknown> | null
   status: string
   loading: boolean
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: Module1Data): void
-  (e: 'regenerate'): void
-  (e: 'save'): void
-  (e: 'confirm'): void
-  (e: 'export'): void
+  'update:modelValue': [value: Record<string, unknown>]
+  regenerate: []
+  save: []
+  confirm: []
+  export: []
 }>()
 
-const fields = computed(() => [
-  { key: 'course_name', label: '课程名称', span: 1 },
-  { key: 'student_count', label: '修课人数', span: 1 },
-  { key: 'course_code', label: '课程编号', span: 1 },
-  { key: 'course_seq', label: '课序号', span: 1 },
-  { key: 'teaching_class', label: '授课班级', span: 1 },
-  { key: 'total_hours', label: '学时数', span: 1 },
-  { key: 'textbook', label: '选用教材', span: 3 },
-  { key: 'credits', label: '学分', span: 1 },
-  { key: 'department', label: '开课院系', span: 1 },
-  { key: 'teacher', label: '授课教师', span: 1 },
-  { key: 'course_nature', label: '课程性质', span: 1 },
-  { key: 'course_type', label: '课程类型', span: 1 },
-])
+const fields = [
+  { key: 'course_name', label: '课程名称' },
+  { key: 'course_code', label: '课程编号' },
+  { key: 'course_seq', label: '课序号' },
+  { key: 'teaching_class', label: '授课班级' },
+  { key: 'student_count', label: '修课人数' },
+  { key: 'total_hours', label: '学时数' },
+  { key: 'credits', label: '学分' },
+  { key: 'textbook', label: '选用教材' },
+  { key: 'department', label: '开课院系' },
+  { key: 'teacher', label: '授课教师' },
+  { key: 'course_nature', label: '课程性质' },
+  { key: 'course_type', label: '课程类型' },
+]
 
-function onFieldChange(key: string, value: string) {
-  if (!props.modelValue) return
-  emit('update:modelValue', { ...props.modelValue, [key]: value })
+const form = ref<Record<string, string>>({})
+
+watch(() => props.modelValue, (v) => {
+  if (v) {
+    const m: Record<string, string> = {}
+    for (const f of fields) {
+      m[f.key] = String(v[f.key] ?? '')
+    }
+    form.value = m
+  }
+}, { immediate: true })
+
+function onInput() {
+  emit('update:modelValue', { ...form.value })
 }
 
-const studentSummary = computed(() => {
-  if (!props.modelValue) return ''
-  const total = props.modelValue.student_count
-  const male = props.modelValue.male_count ?? 0
-  const female = props.modelValue.female_count ?? 0
-  if (!total) return ''
-  return `学生概况：共 ${total} 人 (男 ${male}，女 ${female})`
-})
+const readonly = computed(() => props.status === 'confirmed')
 </script>
 
 <template>
-  <div v-loading="loading">
-    <el-alert
-      v-if="!modelValue"
-      title="尚未生成数据，请点击"生成模块"按钮"
-      type="info"
-      show-icon
-      :closable="false"
-      style="margin-bottom: 16px"
-    />
-
-    <template v-if="modelValue">
-      <el-form label-width="100px" label-position="left">
-        <el-row :gutter="16">
-          <el-col v-for="f in fields" :key="f.key" :span="f.span === 3 ? 18 : 6">
-            <el-form-item :label="f.label">
-              <el-input
-                :model-value="String(modelValue[f.key as keyof Module1Data] ?? '')"
-                @update:model-value="(v: string) => onFieldChange(f.key, v)"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-
-      <div v-if="studentSummary" style="margin-top: 12px; padding: 12px; background: #f5f7fa; border-radius: 4px; font-size: 14px; color: #606266">
-        {{ studentSummary }}
-      </div>
-    </template>
-
-    <div style="margin-top: 20px; display: flex; gap: 8px">
-      <el-button type="primary" :loading="loading" @click="emit('regenerate')">
-        {{ modelValue ? '重新生成' : '生成模块' }}
+  <div v-loading="loading" element-loading-text="生成中...">
+    <el-form :model="form" label-width="100px" :disabled="readonly">
+      <el-row :gutter="16">
+        <el-col v-for="f in fields" :key="f.key" :span="12">
+          <el-form-item :label="f.label">
+            <el-input :model-value="form[f.key]" @input="(v: string) => { form[f.key] = v; onInput() }" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+    </el-form>
+    <div style="margin-top: 12px; display: flex; gap: 8px">
+      <el-button :loading="loading" @click="emit('regenerate')">
+        <el-icon><Edit /></el-icon> 重新生成
       </el-button>
-      <el-button v-if="modelValue" @click="emit('save')">保存草稿</el-button>
-      <el-button v-if="modelValue" type="success" @click="emit('confirm')">
-        <el-icon style="margin-right: 4px"><component is="Check" /></el-icon>
-        确认并导出Word
-      </el-button>
-      <el-tag v-if="status === 'confirmed'" type="success" size="large" style="margin-left: auto">
-        已确认
-      </el-tag>
-      <el-tag v-else-if="status === 'draft'" type="info" size="large" style="margin-left: auto">
-        草稿
-      </el-tag>
+      <el-button type="primary" :loading="loading" :disabled="status === 'confirmed'" @click="emit('save')">保存草稿</el-button>
+      <el-button type="success" :loading="loading" :disabled="status === 'confirmed'" @click="emit('confirm')">确认</el-button>
+      <el-button :loading="loading" @click="emit('export')">导出Word</el-button>
     </div>
   </div>
 </template>
