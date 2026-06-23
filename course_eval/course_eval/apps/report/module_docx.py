@@ -140,16 +140,67 @@ def export_module_3_docx(report):
 
 # ── Module 4: Evaluation Results ────────────────────────────────────────────
 
-def export_module_4_docx(report):
-    doc = _setup_document(report)
-    _add_heading(doc, '四、课程评价结果')
+def _render_module_4_to_docx(doc, module_4_data):
+    """Render Module 4 sections into a docx Document. Shared by standalone export
+    and merge export in views.py."""
+    sections = module_4_data.get('sections')
 
-    eval_results = report.report_data.get('module_4_evaluation_results', {})
-    grade_analysis = eval_results.get('grade_analysis', {})
+    if sections:
+        for section in sections:
+            _add_heading(doc, section['col_name'], level=2)
+            _add_paragraph(doc, section['description_line_1'])
+            _add_paragraph(doc, section['description_line_2'])
 
+            segments = section['segments']
+            num_cols = len(segments) + 2
+            table = doc.add_table(rows=3, cols=num_cols, style='Table Grid')
+
+            # Row 0: 分数段 | segment labels... | 平均分
+            _set_cell(table.cell(0, 0), '分数段', bold=True)
+            for ci, seg in enumerate(segments):
+                _set_cell(table.cell(0, ci + 1), seg['label'], bold=True)
+            _set_cell(table.cell(0, num_cols - 1), '平均分', bold=True)
+
+            # Row 1: 人数 | counts... | avg_score
+            _set_cell(table.cell(1, 0), '人数')
+            for ci, seg in enumerate(segments):
+                _set_cell(table.cell(1, ci + 1), str(seg['count']))
+            _set_cell(table.cell(1, num_cols - 1), str(section['avg_score']))
+
+            # Row 2: 比例% | pcts... | 100
+            _set_cell(table.cell(2, 0), '比例%')
+            for ci, seg in enumerate(segments):
+                _set_cell(table.cell(2, ci + 1), f"{seg['pct']}%")
+            _set_cell(table.cell(2, num_cols - 1), '100')
+
+            # Stats summary
+            s = section['stats']
+            p = doc.add_paragraph()
+            for label, val in [
+                ('参考人数：', s['count']),
+                ('缺考人数：', s['missing']),
+                ('最高分：', s['max']),
+                ('最低分：', s['min']),
+                ('平均分：', s['avg']),
+                ('中位数：', s['median']),
+                ('标准差：', s['stdev']),
+            ]:
+                _run_font(p.add_run(f'{label}{val}　　'))
+            _run_font(p.add_run(f'及格率：{s["pass_rate"]}%'))
+
+            # AI summary
+            ai_summary = section.get('ai_summary', '')
+            if ai_summary:
+                _add_paragraph(doc, '')
+                _add_paragraph(doc, '【AI分析摘要】')
+                _add_paragraph(doc, ai_summary)
+        return
+
+    # Legacy fallback: old-format grade_analysis
+    grade_analysis = module_4_data.get('grade_analysis', {})
     if not grade_analysis:
         _add_paragraph(doc, '暂无成绩数据')
-        return _to_buffer(doc)
+        return
 
     for col_name, stats in grade_analysis.items():
         _add_heading(doc, col_name, level=2)
@@ -185,6 +236,11 @@ def export_module_4_docx(report):
             _set_cell(dist_table.cell(dist_idx, 2), f'{pct}%')
             dist_idx += 1
 
+
+def export_module_4_docx(report):
+    doc = _setup_document(report)
+    _add_heading(doc, '四、课程评价结果')
+    _render_module_4_to_docx(doc, report.report_data.get('module_4_evaluation_results', {}))
     return _to_buffer(doc)
 
 

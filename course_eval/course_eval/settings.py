@@ -21,6 +21,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load .env.local from repo root
 load_dotenv(BASE_DIR.parent / '.env.local')
 
+# Zhipu AI (智谱) API — BigModel GLM
+ZHIPU_API_KEY = os.getenv('ZHIPU_API_KEY', '')
+ZHIPU_API_ENDPOINT = os.getenv('ZHIPU_API_ENDPOINT', 'https://open.bigmodel.cn/api/paas/v4/chat/completions')
+ZHIPU_MODEL = os.getenv('ZHIPU_MODEL', 'glm-4-flash')
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/

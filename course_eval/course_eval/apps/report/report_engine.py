@@ -27,6 +27,94 @@ def _find_file(course_id, class_id, semester, user_id, file_type):
 
 NON_SCORE_COLUMNS = {'学号', '序号', '编号', 'ID', 'id', 'No', 'no', '学生证号'}
 
+
+def _parse_range_from_label(label):
+    """Parse a numeric score range from a table header label.
+
+    Examples: "90-100（优秀）" → (90, 101), "<60（不及格）" → (0, 60)
+    Returns (lo, hi) where hi is exclusive, or None if no range found.
+    """
+    import re
+    text = str(label).strip()
+    # "NN-NN" pattern
+    m = re.search(r'(\d+)\s*[-–—]\s*(\d+)', text)
+    if m:
+        lo = float(m.group(1))
+        hi = float(m.group(2)) + 1  # exclusive upper bound
+        return (lo, hi)
+    # "<NN" pattern
+    m = re.search(r'<\s*(\d+)', text)
+    if m:
+        return (0.0, float(m.group(1)))
+    # ">NN" or ">=NN" pattern
+    m = re.search(r'>[=]?\s*(\d+)', text)
+    if m:
+        return (float(m.group(1)), 101.0)
+    return None
+
+
+def _extract_score_segments(evaluation_standards):
+    """Extract score segment definitions from syllabus evaluation_standards blocks.
+
+    Returns a list of dicts: [{'label': str, 'lo': float, 'hi': float}, ...]
+    or None if no usable table is found.
+    """
+    if not evaluation_standards or not isinstance(evaluation_standards, list):
+        return None
+
+    for block in evaluation_standards:
+        if block.get('type') != 'table':
+            continue
+        grid = block.get('grid')
+        if not grid or not grid[0]:
+            continue
+
+        header_row = grid[0]
+        num_cols = len(header_row)
+        if num_cols < 2:
+            continue
+
+        segments = []
+        # Skip first column (usually "考核项目") and iterate middle columns
+        for c in range(1, num_cols):
+            cell = header_row[c]
+            if cell is None:
+                continue
+            text = str(cell.get('text', '')).strip()
+            if not text:
+                continue
+            range_result = _parse_range_from_label(text)
+            if range_result:
+                lo, hi = range_result
+                segments.append({'label': text, 'lo': lo, 'hi': hi})
+
+        if segments:
+            return segments
+
+    return None
+
+
+def _find_name_column_index(headers):
+    """Find the positional index of the '姓名' column in headers list."""
+    for i, h in enumerate(headers):
+        clean = str(h).replace(' ', '').strip()
+        if '姓名' in clean:
+            return i
+    return None
+
+
+def _is_score_column(col_name, col_values, col_index, name_col_index):
+    """Check if a column is a score column using position + content heuristics.
+
+    Columns to the left of or at '姓名' are excluded.
+    """
+    if col_name in NON_SCORE_COLUMNS:
+        return False
+    if name_col_index is not None and col_index <= name_col_index:
+        return False
+    return _is_numeric_column(col_name, col_values)
+
+
 def _is_numeric_column(col_name, values):
     """Heuristic: a column is numeric if a majority of non-empty values parse as floats.
     Excludes identifier columns like 学号, 序号, 编号."""
@@ -59,13 +147,22 @@ def _parse_score(val):
         return None
 
 
-def _analyze_grades(headers, rows):
-    """Compute statistics for each numeric score column."""
+def _analyze_grades(headers, rows, segments=None):
+    """Compute statistics for each numeric score column.
+
+    Args:
+        segments: Optional list of dicts [{'label', 'lo', 'hi'}] from syllabus.
+                  If None or empty, falls back to hardcoded SCORE_BUCKETS.
+    """
+    name_col_index = _find_name_column_index(headers)
     score_columns = []
-    for col in headers:
+    for i, col in enumerate(headers):
         col_values = [row.get(col) for row in rows if col in row]
-        if _is_numeric_column(col, col_values):
+        if _is_score_column(col, col_values, i, name_col_index):
             score_columns.append(col)
+
+    # Build segment definitions
+    use_segments = segments if segments else SCORE_BUCKETS
 
     analysis = {}
     for col in score_columns:
@@ -77,8 +174,13 @@ def _analyze_grades(headers, rows):
             continue
 
         dist = {}
-        for key, label, lo, hi in SCORE_BUCKETS:
-            dist[key] = {'label': label, 'count': sum(1 for s in scores if lo <= s < hi)}
+        if segments:
+            for seg in segments:
+                count = sum(1 for s in scores if seg['lo'] <= s < seg['hi'])
+                dist[seg['label']] = {'label': seg['label'], 'count': count}
+        else:
+            for key, label, lo, hi in SCORE_BUCKETS:
+                dist[key] = {'label': label, 'count': sum(1 for s in scores if lo <= s < hi)}
 
         pass_count = sum(1 for s in scores if s >= 60)
         analysis[col] = {
@@ -216,20 +318,146 @@ def generate_module_3(syllabus_fields):
     return syllabus_fields.get('evaluation_standards', '未填写')
 
 
-def generate_module_4(grades_file, user_id):
-    """Generate Module 4: Evaluation Results (grade analysis)."""
+def _build_grade_summary_prompt(section):
+    """Build a prompt for AI to generate a ~400-word grade analysis summary."""
+    s = section['stats']
+    segs = section['segments']
+    col = section['col_name']
+
+    dist_lines = '\n'.join(
+        f"- {seg['label']}: {seg['count']}人，占比{seg['pct']}%"
+        for seg in segs
+    )
+
+    return f"""请以教育数据分析师的身份，对以下"{col}"的成绩统计数据写一段约400字的分析文字描述：
+
+【成绩统计数据】
+- 参考人数：{s['count']}人
+- 缺考人数：{s['missing']}人
+- 最高分：{s['max']}分
+- 最低分：{s['min']}分
+- 平均分：{s['avg']}分
+- 中位数：{s['median']}分
+- 标准差：{s['stdev']}
+- 及格率：{s['pass_rate']}%
+
+【成绩分布】
+{dist_lines}
+
+请从以下几个角度进行分析：
+1. 整体成绩水平如何？
+2. 成绩分布的集中与离散程度
+3. 需要关注的问题（如不及格比例、高分比例等）
+4. 简要的教学改进建议
+
+要求：语言专业、客观，控制在400字左右，不要分段标题，直接以连贯段落输出。"""
+
+
+def _generate_ai_summary(section):
+    """Call Zhipu AI API to generate an AI summary for a grade section."""
+    from course_eval.utils.zhipu import call_zhipu
+
+    system_prompt = '你是一位经验丰富的教育数据分析师，擅长对课程成绩数据进行专业、客观的分析。'
+    user_prompt = _build_grade_summary_prompt(section)
+
+    try:
+        result = call_zhipu(system_prompt, user_prompt)
+        return result
+    except Exception:
+        return ''
+
+
+def generate_module_4(grades_file, user_id, evaluation_standards=None):
+    """Generate Module 4: Evaluation Results (grade analysis).
+
+    Args:
+        evaluation_standards: Optional list of blocks from syllabus parsing.
+            Used to extract score segment definitions dynamically.
+    """
     if not grades_file:
         return {
+            'sections': [],
+            'segment_labels': [],
+            'generated': False,
+            'fallback': True,
             'grade_analysis': {},
             'score_columns': [],
-            'generated': False,
         }
+
     grades_data = get_effective_data(grades_file, user_id)
-    grade_analysis = _analyze_grades(grades_data['headers'], grades_data['rows'])
+    segments = _extract_score_segments(evaluation_standards)
+    fallback = segments is None
+
+    # Build segment_labels for table header
+    if segments:
+        segment_labels = [s['label'] for s in segments]
+    else:
+        segment_labels = [label for _, label, _, _ in SCORE_BUCKETS]
+
+    grade_analysis = _analyze_grades(grades_data['headers'], grades_data['rows'], segments)
+
+    # Build new sections format (without AI summaries first)
+    sections = []
+    future_tasks = []  # (section_index, callable) for parallel AI generation
+
+    for col_name, stats in grade_analysis.items():
+        desc1 = f'学生{col_name}成绩统计'
+        desc2 = f'学生课程{col_name}成绩分布如下表所示'
+
+        section_segments = []
+        total = stats['count']
+        for key, dist in stats['distribution'].items():
+            pct = round(dist['count'] / total * 100, 1) if total else 0
+            section_segments.append({
+                'label': dist['label'],
+                'count': dist['count'],
+                'pct': pct,
+            })
+
+        section_data = {
+            'col_name': col_name,
+            'description_line_1': desc1,
+            'description_line_2': desc2,
+            'stats': {
+                'count': stats['count'],
+                'missing': stats['missing'],
+                'max': stats['max'],
+                'min': stats['min'],
+                'avg': stats['avg'],
+                'median': stats['median'],
+                'stdev': stats['stdev'],
+                'pass_rate': stats['pass_rate'],
+            },
+            'segments': section_segments,
+            'avg_score': stats['avg'],
+            'ai_summary': '',
+        }
+        sections.append(section_data)
+        # Prepare AI summary task for parallel execution
+        future_tasks.append((len(sections) - 1, section_data))
+
+    # Generate AI summaries in parallel
+    if future_tasks:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=len(future_tasks)) as executor:
+            futures = {
+                executor.submit(_generate_ai_summary, task[1]): task[0]
+                for task in future_tasks
+            }
+            for future in as_completed(futures, timeout=60):
+                idx = futures[future]
+                try:
+                    sections[idx]['ai_summary'] = future.result()
+                except Exception:
+                    pass  # keep empty string
+
     return {
+        'sections': sections,
+        'segment_labels': segment_labels,
+        'generated': bool(grade_analysis),
+        'fallback': fallback,
         'grade_analysis': grade_analysis,
         'score_columns': list(grade_analysis.keys()),
-        'generated': bool(grade_analysis),
     }
 
 
@@ -261,11 +489,12 @@ def generate_report(user_id, course_id, class_id, semester_name):
         info_data = get_effective_data(student_info_file, user_id)
         student_stats = _analyze_student_info(info_data['headers'], info_data['rows'])
 
+    evaluation_standards = syllabus_fields.get('evaluation_standards')
     report_data = {
         'module_1_course_info': generate_module_1(course, class_group, syllabus_fields, student_stats, raw_table_kv),
         'module_2_objectives': generate_module_2(syllabus_fields),
         'module_3_evaluation_standards': generate_module_3(syllabus_fields),
-        'module_4_evaluation_results': generate_module_4(grades_file, user_id),
+        'module_4_evaluation_results': generate_module_4(grades_file, user_id, evaluation_standards),
         'module_5_improvement_plan': generate_module_5(),
     }
 

@@ -15,5 +15,6 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "redis>=8.0.0",
     "reportlab>=4.5.1",
+    "requests>=2.34.2",
     "xlrd>=2.0.2",
 ]

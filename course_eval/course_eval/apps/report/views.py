@@ -12,6 +12,7 @@ from .report_engine import _find_file
 from .module_docx import (
     export_module_1_docx, export_module_2_docx, export_module_3_docx,
     export_module_4_docx, export_module_5_docx,
+    _render_module_4_to_docx,
 )
 from .pdf_engine import generate_pdf
 
@@ -65,7 +66,9 @@ def _regenerate_module(report, module_num):
         return generate_module_3(syllabus_fields)
 
     elif module_num == 4:
-        return generate_module_4(report.grades_file, user_id)
+        syllabus_fields = _parse_syllabus(report.syllabus_file)
+        evaluation_standards = syllabus_fields.get('evaluation_standards')
+        return generate_module_4(report.grades_file, user_id, evaluation_standards)
 
     elif module_num == 5:
         return generate_module_5()
@@ -553,45 +556,7 @@ class ReportMergeView(APIView):
         h = doc.add_heading('四、课程评价结果', level=1)
         for run in h.runs:
             _run_font(run)
-        eval_results = rd.get('module_4_evaluation_results', {})
-        grade_analysis = eval_results.get('grade_analysis', {})
-        if grade_analysis:
-            for col_name, stats in grade_analysis.items():
-                h2 = doc.add_heading(col_name, level=2)
-                for run in h2.runs:
-                    _run_font(run)
-                p = doc.add_paragraph()
-                for label, val in [
-                    ('参考人数：', stats['count']),
-                    ('缺考人数：', stats['missing']),
-                    ('最高分：', stats['max']),
-                    ('最低分：', stats['min']),
-                    ('平均分：', stats['avg']),
-                    ('中位数：', stats['median']),
-                    ('标准差：', stats['stdev']),
-                ]:
-                    _run_font(p.add_run(f'{label}{val}　　'))
-                _run_font(p.add_run(f'及格率：{stats["pass_rate"]}%'))
-
-                dp = doc.add_paragraph('成绩分布：')
-                for run in dp.runs:
-                    _run_font(run)
-                dist_table = doc.add_table(rows=1 + len(stats['distribution']), cols=3, style='Table Grid')
-                _set_cell(dist_table.cell(0, 0), '分数段', bold=True)
-                _set_cell(dist_table.cell(0, 1), '人数', bold=True)
-                _set_cell(dist_table.cell(0, 2), '占比', bold=True)
-                dist_idx = 1
-                total = stats['count']
-                for key, dist in stats['distribution'].items():
-                    _set_cell(dist_table.cell(dist_idx, 0), dist['label'])
-                    _set_cell(dist_table.cell(dist_idx, 1), str(dist['count']))
-                    pct = round(dist['count'] / total * 100, 1) if total else 0
-                    _set_cell(dist_table.cell(dist_idx, 2), f'{pct}%')
-                    dist_idx += 1
-        else:
-            p = doc.add_paragraph('暂无成绩数据')
-            for run in p.runs:
-                _run_font(run)
+        _render_module_4_to_docx(doc, rd.get('module_4_evaluation_results', {}))
 
         # ── Module 5 ──
         h = doc.add_heading('五、课程持续改进方案及措施', level=1)

@@ -29,15 +29,47 @@ export interface GradeStats {
   distribution: Record<string, { label: string; count: number }>
 }
 
+export interface SegmentEntry {
+  label: string
+  count: number
+  pct: number
+}
+
+export interface GradeSectionBaseStats {
+  count: number
+  missing: number
+  max: number
+  min: number
+  avg: number
+  median: number
+  stdev: number
+  pass_rate: number
+}
+
+export interface GradeSection {
+  col_name: string
+  description_line_1: string
+  description_line_2: string
+  stats: GradeSectionBaseStats
+  segments: SegmentEntry[]
+  avg_score: number
+  ai_summary?: string
+}
+
+export interface Module4Data {
+  sections: GradeSection[]
+  segment_labels: string[]
+  generated: boolean
+  fallback: boolean
+  grade_analysis: Record<string, GradeStats>
+  score_columns: string[]
+}
+
 export interface ReportData {
   module_1_course_info: Record<string, unknown>
   module_2_objectives: string
   module_3_evaluation_standards: string | Array<{ type: string; [key: string]: unknown }>
-  module_4_evaluation_results: {
-    grade_analysis: Record<string, GradeStats>
-    score_columns: string[]
-    generated: boolean
-  }
+  module_4_evaluation_results: Module4Data
   module_5_improvement_plan: string
 }
 
@@ -86,7 +118,7 @@ export function getReports(courseId?: number, classId?: number, semesterName?: s
 // ── Per-module API functions ───────────────────────────────────────────────
 
 export function generateModule(reportId: number, moduleNum: number) {
-  return request.post(`/report/${reportId}/module/${moduleNum}/generate/`)
+  return request.post(`/report/${reportId}/module/${moduleNum}/generate/`, {}, { timeout: 120000 })
 }
 
 const MODULE_DATA_KEYS: Record<number, string> = {
