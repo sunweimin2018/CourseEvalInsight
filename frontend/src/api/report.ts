@@ -65,12 +65,24 @@ export interface Module4Data {
   score_columns: string[]
 }
 
+export interface Module5Part2 {
+  problems: string
+  measures: string
+  expected_effects: string
+}
+
+export interface Module5Data {
+  part1: string
+  part2: Module5Part2
+  part3: string
+}
+
 export interface ReportData {
   module_1_course_info: Record<string, unknown>
   module_2_objectives: string
   module_3_evaluation_standards: string | Array<{ type: string; [key: string]: unknown }>
   module_4_evaluation_results: Module4Data
-  module_5_improvement_plan: string
+  module_5_improvement_plan: Module5Data | string
 }
 
 export interface ReportPreview extends ReportRecord {

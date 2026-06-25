@@ -6,8 +6,84 @@ a standalone .docx file for that module.
 
 from io import BytesIO
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+
+def _setup_matplotlib_chinese():
+    """Configure matplotlib for Chinese font rendering. Call once."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.font_manager import FontProperties
+    # Try to find a Chinese font
+    candidates = [
+        'C:/Windows/Fonts/simsun.ttc',
+        'C:/Windows/Fonts/SIMSUN.TTC',
+        'C:/Windows/Fonts/msyh.ttc',
+        'C:/Windows/Fonts/MSYH.TTC',
+        'C:/Windows/Fonts/simhei.ttf',
+        '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+        '/System/Library/Fonts/Songti.ttc',
+    ]
+    for path in candidates:
+        import os
+        if os.path.exists(path):
+            return FontProperties(fname=path, size=10)
+    return None
+
+
+_chinese_font = None
+
+
+def _get_chinese_font():
+    global _chinese_font
+    if _chinese_font is None:
+        _chinese_font = _setup_matplotlib_chinese()
+    return _chinese_font
+
+
+def _generate_chart_image(section):
+    """Generate a bar chart image for a grade section. Returns BytesIO or None."""
+    import matplotlib.pyplot as plt
+
+    segments = section.get('segments', [])
+    if not segments:
+        return None
+
+    labels = [s['label'] for s in segments]
+    counts = [s['count'] for s in segments]
+    col_name = section.get('col_name', '')
+
+    font = _get_chinese_font()
+    fig, ax = plt.subplots(figsize=(7, 4))
+    bars = ax.bar(labels, counts, color='#409eff', edgecolor='white')
+    ax.set_title(f'学生{col_name}成绩分布图', fontproperties=font, fontsize=14)
+    ax.set_xlabel('分数段', fontproperties=font, fontsize=11)
+    ax.set_ylabel('人数', fontproperties=font, fontsize=11)
+
+    # Set tick labels with font
+    if font:
+        for label in ax.get_xticklabels():
+            label.set_fontproperties(font)
+        for label in ax.get_yticklabels():
+            label.set_fontproperties(font)
+
+    # Add count labels on top of bars
+    for bar, count in zip(bars, counts):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                str(count), ha='center', va='bottom', fontsize=10)
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+
+    buf = BytesIO()
+    fig.savefig(buf, format='png', dpi=150)
+    buf.seek(0)
+    plt.close(fig)
+    return buf
 
 
 def _setup_document(report):
@@ -155,8 +231,8 @@ def _render_module_4_to_docx(doc, module_4_data):
             num_cols = len(segments) + 2
             table = doc.add_table(rows=3, cols=num_cols, style='Table Grid')
 
-            # Row 0: 分数段 | segment labels... | 平均分
-            _set_cell(table.cell(0, 0), '分数段', bold=True)
+            # Row 0: 类别 | segment labels... | 平均分
+            _set_cell(table.cell(0, 0), '类别', bold=True)
             for ci, seg in enumerate(segments):
                 _set_cell(table.cell(0, ci + 1), seg['label'], bold=True)
             _set_cell(table.cell(0, num_cols - 1), '平均分', bold=True)
@@ -172,6 +248,21 @@ def _render_module_4_to_docx(doc, module_4_data):
             for ci, seg in enumerate(segments):
                 _set_cell(table.cell(2, ci + 1), f"{seg['pct']}%")
             _set_cell(table.cell(2, num_cols - 1), '100')
+
+            # Chart image (best-effort, skip on failure)
+            try:
+                chart_buf = _generate_chart_image(section)
+                if chart_buf:
+                    chart_paragraph = doc.add_paragraph()
+                    chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    chart_run = chart_paragraph.add_run()
+                    chart_run.add_picture(chart_buf, width=Inches(5.5))
+                    caption = doc.add_paragraph(f'图：学生{section["col_name"]}成绩分布图')
+                    caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    for run in caption.runs:
+                        _run_font(run, font_size=Pt(10))
+            except Exception:
+                pass  # chart generation is best-effort
 
             # Stats summary
             s = section['stats']
@@ -192,7 +283,6 @@ def _render_module_4_to_docx(doc, module_4_data):
             ai_summary = section.get('ai_summary', '')
             if ai_summary:
                 _add_paragraph(doc, '')
-                _add_paragraph(doc, '【AI分析摘要】')
                 _add_paragraph(doc, ai_summary)
         return
 
@@ -223,7 +313,7 @@ def _render_module_4_to_docx(doc, module_4_data):
             _run_font(run)
 
         dist_table = doc.add_table(rows=1 + len(stats['distribution']), cols=3, style='Table Grid')
-        _set_cell(dist_table.cell(0, 0), '分数段', bold=True)
+        _set_cell(dist_table.cell(0, 0), '类别', bold=True)
         _set_cell(dist_table.cell(0, 1), '人数', bold=True)
         _set_cell(dist_table.cell(0, 2), '占比', bold=True)
 
@@ -249,5 +339,57 @@ def export_module_4_docx(report):
 def export_module_5_docx(report):
     doc = _setup_document(report)
     _add_heading(doc, '五、课程持续改进方案及措施')
-    _add_paragraph(doc, report.report_data.get('module_5_improvement_plan', '待后续版本实现'))
+
+    data = report.report_data.get('module_5_improvement_plan', {})
+
+    if isinstance(data, dict):
+        # New structured format
+        # 4.1
+        _add_heading(doc, '4.1 连续两年课程评价结果系统地纳入课程持续改进的措施及其效果描述', level=2)
+        _add_paragraph(doc, data.get('part1', ''))
+
+        # 4.2
+        _add_heading(doc, '4.2 本年度课程教学环节发现的问题、相应持续改进的措施以及描述预期将可能达到的效果', level=2)
+        part2 = data.get('part2', {})
+        if isinstance(part2, dict):
+            _add_heading(doc, '(1) 存在的问题', level=3)
+            _add_paragraph(doc, part2.get('problems', ''))
+            _add_heading(doc, '(2) 持续改进措施', level=3)
+            _add_paragraph(doc, part2.get('measures', ''))
+            _add_heading(doc, '(3) 预期效果', level=3)
+            _add_paragraph(doc, part2.get('expected_effects', ''))
+        else:
+            _add_paragraph(doc, str(part2))
+
+        # 4.3
+        _add_heading(doc, '4.3 其他可用的协助持续改进的资源', level=2)
+        _add_paragraph(doc, data.get('part3', ''))
+    else:
+        # Legacy string format
+        _add_paragraph(doc, str(data) if data else '待后续版本实现')
+
     return _to_buffer(doc)
+
+
+def _render_module_5_to_docx(doc, data):
+    """Render Module 5 structured data into an existing document (for merge)."""
+    if isinstance(data, dict):
+        _add_heading(doc, '4.1 连续两年课程评价结果系统地纳入课程持续改进的措施及其效果描述', level=2)
+        _add_paragraph(doc, data.get('part1', ''))
+
+        _add_heading(doc, '4.2 本年度课程教学环节发现的问题、相应持续改进的措施以及描述预期将可能达到的效果', level=2)
+        part2 = data.get('part2', {})
+        if isinstance(part2, dict):
+            _add_heading(doc, '(1) 存在的问题', level=3)
+            _add_paragraph(doc, part2.get('problems', ''))
+            _add_heading(doc, '(2) 持续改进措施', level=3)
+            _add_paragraph(doc, part2.get('measures', ''))
+            _add_heading(doc, '(3) 预期效果', level=3)
+            _add_paragraph(doc, part2.get('expected_effects', ''))
+        else:
+            _add_paragraph(doc, str(part2))
+
+        _add_heading(doc, '4.3 其他可用的协助持续改进的资源', level=2)
+        _add_paragraph(doc, data.get('part3', ''))
+    else:
+        _add_paragraph(doc, str(data) if data else '待后续版本实现')

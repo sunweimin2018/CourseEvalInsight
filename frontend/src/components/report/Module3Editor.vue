@@ -123,7 +123,7 @@ function removeBlock(idx: number) {
 </script>
 
 <template>
-  <div v-loading="loading" element-loading-text="生成中...">
+  <div v-loading="loading" element-loading-text="生成中..." element-loading-fullscreen element-loading-lock>
     <template v-if="isLegacy">
       <el-input
         :model-value="legacyText"

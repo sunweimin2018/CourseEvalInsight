@@ -12,7 +12,7 @@ from .report_engine import _find_file
 from .module_docx import (
     export_module_1_docx, export_module_2_docx, export_module_3_docx,
     export_module_4_docx, export_module_5_docx,
-    _render_module_4_to_docx,
+    _render_module_4_to_docx, _render_module_5_to_docx,
 )
 from .pdf_engine import generate_pdf
 
@@ -71,7 +71,12 @@ def _regenerate_module(report, module_num):
         return generate_module_4(report.grades_file, user_id, evaluation_standards)
 
     elif module_num == 5:
-        return generate_module_5()
+        from .report_engine import _build_module5_context
+        rd = report.report_data
+        module_2 = rd.get('module_2_objectives', '')
+        module_4 = rd.get('module_4_evaluation_results', {})
+        context = _build_module5_context(course.name, module_2, module_4)
+        return generate_module_5(context)
 
     return None
 
@@ -266,7 +271,7 @@ class ReportExportView(APIView):
                 for run in dp.runs:
                     _run_font(run)
                 dist_table = doc.add_table(rows=1 + len(stats['distribution']), cols=3, style='Table Grid')
-                _set_cell(dist_table.cell(0, 0), '分数段', bold=True)
+                _set_cell(dist_table.cell(0, 0), '类别', bold=True)
                 _set_cell(dist_table.cell(0, 1), '人数', bold=True)
                 _set_cell(dist_table.cell(0, 2), '占比', bold=True)
                 dist_idx = 1
@@ -286,9 +291,16 @@ class ReportExportView(APIView):
         h = doc.add_heading('五、课程持续改进方案及措施', level=1)
         for run in h.runs:
             _run_font(run)
-        p = doc.add_paragraph(rd.get('module_5_improvement_plan', '待后续版本实现'))
-        for run in p.runs:
-            _run_font(run)
+        _render_module_5_to_docx(doc, rd.get('module_5_improvement_plan', {}))
+
+        # Signature lines
+        from datetime import date
+        today = date.today()
+        today_str = f'{today.year}.{today.month}.{today.day}'
+        for label in ('任课教师签名：', '责任教授或系主任签名：'):
+            sig_p = doc.add_paragraph()
+            _run_font(sig_p.add_run(f'{label}                '))
+            _run_font(sig_p.add_run(f'日期：{today_str}'))
 
         from io import BytesIO
 
@@ -562,9 +574,16 @@ class ReportMergeView(APIView):
         h = doc.add_heading('五、课程持续改进方案及措施', level=1)
         for run in h.runs:
             _run_font(run)
-        p = doc.add_paragraph(rd.get('module_5_improvement_plan', '待后续版本实现'))
-        for run in p.runs:
-            _run_font(run)
+        _render_module_5_to_docx(doc, rd.get('module_5_improvement_plan', {}))
+
+        # Signature lines
+        from datetime import date
+        today = date.today()
+        today_str = f'{today.year}.{today.month}.{today.day}'
+        for label in ('任课教师签名：', '责任教授或系主任签名：'):
+            sig_p = doc.add_paragraph()
+            _run_font(sig_p.add_run(f'{label}                '))
+            _run_font(sig_p.add_run(f'日期：{today_str}'))
 
         from io import BytesIO
 

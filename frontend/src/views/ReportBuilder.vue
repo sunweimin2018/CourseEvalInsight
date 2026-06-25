@@ -471,10 +471,10 @@ function onModuleDataUpdate(num: number, data: unknown) {
             <span style="font-weight: 700">五、课程持续改进方案及措施</span>
           </template>
           <Module5Editor
-            :model-value="getModuleData(5) as string | null"
+            :model-value="getModuleData(5) as any"
             :status="moduleStatuses[5]"
             :loading="actionLoading"
-            @update:model-value="(d: string) => onModuleDataUpdate(5, d)"
+            @update:model-value="(d: any) => onModuleDataUpdate(5, d)"
             @regenerate="handleRegenerate(5)"
             @save="handleSave(5)"
             @confirm="handleConfirm(5)"

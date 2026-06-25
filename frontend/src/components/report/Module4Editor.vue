@@ -57,7 +57,7 @@ function sectionBarChartOption(section: GradeSection): EChartsOption | undefined
 </script>
 
 <template>
-  <div v-loading="loading" element-loading-text="生成中...">
+  <div v-loading="loading" element-loading-text="生成中..." element-loading-fullscreen element-loading-lock>
     <div v-if="!data || !data.generated">
       <el-empty description="暂无成绩数据，请重新生成" />
     </div>
@@ -112,7 +112,6 @@ function sectionBarChartOption(section: GradeSection): EChartsOption | undefined
 
           <!-- AI Summary textarea -->
           <div v-if="section.ai_summary !== undefined && section.ai_summary !== ''" style="margin-top: 20px">
-            <label class="summary-label">AI分析描述（可编辑）</label>
             <el-input
               type="textarea"
               :rows="6"
@@ -189,12 +188,5 @@ function sectionBarChartOption(section: GradeSection): EChartsOption | undefined
 }
 :deep(.el-table .cell) {
   font-weight: inherit;
-}
-.summary-label {
-  display: block;
-  font-weight: 700;
-  font-size: 14px;
-  color: #303133;
-  margin-bottom: 8px;
 }
 </style>

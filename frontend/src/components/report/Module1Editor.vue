@@ -51,7 +51,7 @@ const readonly = computed(() => props.status === 'confirmed')
 </script>
 
 <template>
-  <div v-loading="loading" element-loading-text="生成中...">
+  <div v-loading="loading" element-loading-text="生成中..." element-loading-fullscreen element-loading-lock>
     <el-form :model="form" label-width="100px" :disabled="readonly">
       <el-row :gutter="16">
         <el-col v-for="f in fields" :key="f.key" :span="12">

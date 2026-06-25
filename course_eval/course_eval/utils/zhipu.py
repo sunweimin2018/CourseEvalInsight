@@ -10,7 +10,7 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-ZHIPU_TIMEOUT = 30  # seconds
+ZHIPU_TIMEOUT = 60  # seconds
 
 
 def call_zhipu(system_prompt: str, user_prompt: str) -> str:

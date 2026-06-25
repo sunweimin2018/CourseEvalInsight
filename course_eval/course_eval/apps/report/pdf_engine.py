@@ -9,10 +9,12 @@ from reportlab.lib import colors
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
 )
-from reportlab.platypus.flowables import KeepTogether
+from reportlab.platypus.flowables import KeepTogether, Image
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.pdfmetrics import registerFontFamily
+
+from .module_docx import _generate_chart_image
 
 FONT_NAME = 'simsun'
 FONT_SIZE = 10
@@ -179,7 +181,7 @@ def _build_dist_table(stats, s):
     dist = stats['distribution']
 
     data = [
-        [_p('分数段', cell_bold), _p('人数', cell_bold), _p('占比', cell_bold)],
+        [_p('类别', cell_bold), _p('人数', cell_bold), _p('占比', cell_bold)],
     ]
     total = stats['count']
     for key, d in dist.items():
@@ -252,30 +254,146 @@ def generate_pdf(report_name, report_data):
     # ── Module 4: Evaluation Results ────────────────────────────────────
     story.append(_p('四、课程评价结果', s['h1']))
     eval_results = report_data.get('module_4_evaluation_results', {})
-    grade_analysis = eval_results.get('grade_analysis', {})
-    if grade_analysis:
-        for col_name, stats in grade_analysis.items():
-            story.append(_p(col_name, s['h2']))
-            lines = [
+    sections = eval_results.get('sections')
+
+    if sections:
+        for section in sections:
+            story.append(_p(section['col_name'], s['h2']))
+            story.append(_p(section.get('description_line_1', ''), s['body']))
+            story.append(_p(section.get('description_line_2', ''), s['body']))
+
+            # Build distribution table matching Word format
+            segments = section.get('segments', [])
+            if segments:
+                num_cols = len(segments) + 2  # 类别 + segments + 平均分
+                col_widths = [60] + [int(340 / (num_cols - 1))] * (num_cols - 1)
+
+                # Header row: 类别 | segment labels... | 平均分
+                header_row = [_p('类别', s['cell_bold'])]
+                for seg in segments:
+                    header_row.append(_p(seg['label'], s['cell_center']))
+                header_row.append(_p('平均分', s['cell_bold']))
+
+                # Row 1: 人数 | counts... | avg_score
+                count_row = [_p('人数', s['cell_bold'])]
+                for seg in segments:
+                    count_row.append(_p(str(seg['count']), s['cell_center']))
+                count_row.append(_p(str(section['avg_score']), s['cell_center']))
+
+                # Row 2: 比例% | pcts... | 100
+                pct_row = [_p('比例%', s['cell_bold'])]
+                for seg in segments:
+                    pct_row.append(_p(f"{seg['pct']}%", s['cell_center']))
+                pct_row.append(_p('100', s['cell_center']))
+
+                dist_data = [header_row, count_row, pct_row]
+                tbl = Table(dist_data, colWidths=col_widths, repeatRows=1)
+                tbl.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D9E2F3')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                ]))
+                story.append(tbl)
+                story.append(Spacer(1, 2 * mm))
+
+            # Chart image (best-effort)
+            try:
+                chart_buf = _generate_chart_image(section)
+                if chart_buf:
+                    img = Image(chart_buf, width=140 * mm, height=80 * mm)
+                    story.append(img)
+                    caption = _p(f'图：学生{section["col_name"]}成绩分布图', s['body'])
+                    caption.alignment = TA_CENTER
+                    story.append(caption)
+                    story.append(Spacer(1, 3 * mm))
+            except Exception:
+                pass
+
+            # Stats
+            stats = section['stats']
+            story.append(_p(
                 f"参考人数：{stats['count']}　缺考人数：{stats['missing']}　"
                 f"最高分：{stats['max']}　最低分：{stats['min']}　"
                 f"平均分：{stats['avg']}　中位数：{stats['median']}　"
                 f"标准差：{stats['stdev']}　及格率：{stats['pass_rate']}%",
-            ]
-            for line in lines:
-                story.append(_p(line, s['body']))
-            story.append(_p('成绩分布：', s['body']))
-            story.append(_build_dist_table(stats, s))
-            story.append(Spacer(1, 3 * mm))
+                s['body'],
+            ))
+
+            # AI summary
+            ai_summary = section.get('ai_summary', '')
+            if ai_summary:
+                story.append(_p(ai_summary, s['body']))
+
+            story.append(Spacer(1, 5 * mm))
     else:
-        story.append(_p('暂无成绩数据', s['body']))
+        # Legacy grade_analysis format
+        grade_analysis = eval_results.get('grade_analysis', {})
+        if grade_analysis:
+            for col_name, stats in grade_analysis.items():
+                story.append(_p(col_name, s['h2']))
+                lines = [
+                    f"参考人数：{stats['count']}　缺考人数：{stats['missing']}　"
+                    f"最高分：{stats['max']}　最低分：{stats['min']}　"
+                    f"平均分：{stats['avg']}　中位数：{stats['median']}　"
+                    f"标准差：{stats['stdev']}　及格率：{stats['pass_rate']}%",
+                ]
+                for line in lines:
+                    story.append(_p(line, s['body']))
+                story.append(_p('成绩分布：', s['body']))
+                story.append(_build_dist_table(stats, s))
+                story.append(Spacer(1, 3 * mm))
+        else:
+            story.append(_p('暂无成绩数据', s['body']))
 
     # ── Module 5: Improvement Plan ──────────────────────────────────────
     story.append(_p('五、课程持续改进方案及措施', s['h1']))
     plan = report_data.get('module_5_improvement_plan', '待后续版本实现')
-    for line in str(plan).split('\n'):
-        if line.strip():
-            story.append(_p(line.strip(), s['body']))
+    if isinstance(plan, dict):
+        # 4.1
+        story.append(_p('4.1 连续两年课程评价结果系统地纳入课程持续改进的措施及其效果描述', s['h2']))
+        for line in plan.get('part1', '').split('\n'):
+            if line.strip():
+                story.append(_p(line.strip(), s['body']))
+
+        # 4.2
+        story.append(_p('4.2 本年度课程教学环节发现的问题、相应持续改进的措施以及描述预期将可能达到的效果', s['h2']))
+        part2 = plan.get('part2', {})
+        if isinstance(part2, dict):
+            story.append(_p('(1) 存在的问题', s['h2']))
+            for line in part2.get('problems', '').split('\n'):
+                if line.strip():
+                    story.append(_p(line.strip(), s['body']))
+            story.append(_p('(2) 持续改进措施', s['h2']))
+            for line in part2.get('measures', '').split('\n'):
+                if line.strip():
+                    story.append(_p(line.strip(), s['body']))
+            story.append(_p('(3) 预期效果', s['h2']))
+            for line in part2.get('expected_effects', '').split('\n'):
+                if line.strip():
+                    story.append(_p(line.strip(), s['body']))
+        else:
+            story.append(_p(str(part2), s['body']))
+
+        # 4.3
+        story.append(_p('4.3 其他可用的协助持续改进的资源', s['h2']))
+        for line in plan.get('part3', '').split('\n'):
+            if line.strip():
+                story.append(_p(line.strip(), s['body']))
+    else:
+        for line in str(plan).split('\n'):
+            if line.strip():
+                story.append(_p(line.strip(), s['body']))
+
+    # Signature lines
+    from datetime import date
+    today = date.today()
+    today_str = f'{today.year}.{today.month}.{today.day}'
+    story.append(Spacer(1, 10 * mm))
+    for label in ('任课教师签名：', '责任教授或系主任签名：'):
+        story.append(_p(f'{label}                日期：{today_str}', s['body']))
 
     doc.build(story)
     buf.seek(0)
