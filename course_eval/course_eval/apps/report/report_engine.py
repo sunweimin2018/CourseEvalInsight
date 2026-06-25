@@ -28,6 +28,23 @@ def _find_file(course_id, class_id, semester, user_id, file_type):
 NON_SCORE_COLUMNS = {'学号', '序号', '编号', 'ID', 'id', 'No', 'no', '学生证号'}
 
 
+def _normalize_item_name(name):
+    """Normalize an evaluation item name for fuzzy matching.
+
+    Strips parenthetical content, common suffixes, and whitespace.
+    """
+    import re
+    cleaned = re.sub(r'[（(][^）)]*[）)]', '', name)
+    cleaned = re.sub(r'(成绩|得分|评分|考核|分数)$', '', cleaned)
+    cleaned = cleaned.replace(' ', '').replace('　', '').strip()
+    return cleaned
+
+
+def _default_segments():
+    """Return SCORE_BUCKETS in the same dict format as syllabus-derived segments."""
+    return [{'label': label, 'lo': lo, 'hi': hi} for _, label, lo, hi in SCORE_BUCKETS]
+
+
 def _parse_range_from_label(label):
     """Parse a numeric score range from a table header label.
 
@@ -53,14 +70,20 @@ def _parse_range_from_label(label):
     return None
 
 
-def _extract_score_segments(evaluation_standards):
-    """Extract score segment definitions from syllabus evaluation_standards blocks.
+def _extract_score_segments_by_item(evaluation_standards):
+    """Extract per-item score segment definitions from syllabus evaluation_standards.
 
-    Returns a list of dicts: [{'label': str, 'lo': float, 'hi': float}, ...]
-    or None if no usable table is found.
+    Scans ALL evaluation criteria tables. For each table:
+      - Header row columns (excluding the item-name column) define score ranges.
+      - Data row first-column text is the evaluation item name.
+
+    Returns dict: {item_name: [{'label', 'lo', 'hi'}, ...]}
+    or None if no usable evaluation criteria table is found.
     """
     if not evaluation_standards or not isinstance(evaluation_standards, list):
         return None
+
+    result = {}
 
     for block in evaluation_standards:
         if block.get('type') != 'table':
@@ -74,9 +97,21 @@ def _extract_score_segments(evaluation_standards):
         if num_cols < 2:
             continue
 
+        # Identify the item-name column (usually the one with "考核项目" / "考核内容")
+        item_col_idx = None
+        for c in range(num_cols):
+            cell = header_row[c]
+            if cell and ('考核项目' in str(cell.get('text', ''))
+                         or '考核内容' in str(cell.get('text', ''))
+                         or '评价项目' in str(cell.get('text', ''))):
+                item_col_idx = c
+                break
+
+        # Extract segment definitions — skip the item column only if positively identified
         segments = []
-        # Skip first column (usually "考核项目") and iterate middle columns
-        for c in range(1, num_cols):
+        for c in range(num_cols):
+            if item_col_idx is not None and c == item_col_idx:
+                continue
             cell = header_row[c]
             if cell is None:
                 continue
@@ -88,10 +123,197 @@ def _extract_score_segments(evaluation_standards):
                 lo, hi = range_result
                 segments.append({'label': text, 'lo': lo, 'hi': hi})
 
-        if segments:
-            return segments
+        # Only treat as evaluation criteria table if we found 2+ segments
+        if len(segments) < 2:
+            continue
+
+        # Read data rows: use the identified item column, or default to col 0
+        read_item_col = item_col_idx if item_col_idx is not None else 0
+        for r in range(1, len(grid)):
+            row = grid[r]
+            if read_item_col >= len(row):
+                continue
+            cell = row[read_item_col]
+            if cell is None:
+                continue  # merged cell covered by rowspan
+            item_name = str(cell.get('text', '')).strip()
+            if not item_name:
+                continue
+            result[item_name] = segments
+
+    return result if result else None
+
+
+def _extract_score_weights(evaluation_standards):
+    """Extract evaluation item weight percentages from the syllabus weight table.
+
+    Looks for a table whose header row contains "评价依据及成绩比例" and
+    parses column headers like "课堂表现 10%" → {"课堂表现": 10.0}.
+
+    Returns dict: {item_name: weight_pct, ...} or None if no weight table found.
+    """
+    import re
+
+    if not evaluation_standards or not isinstance(evaluation_standards, list):
+        return None
+
+    for block in evaluation_standards:
+        if block.get('type') != 'table':
+            continue
+        grid = block.get('grid')
+        if not grid or len(grid) < 2:
+            continue
+
+        # Check if header row (row 0) contains "评价依据及成绩比例"
+        header_row = grid[0]
+        has_weight_header = False
+        for cell in header_row:
+            if cell and '评价依据及成绩比例' in str(cell.get('text', '')):
+                has_weight_header = True
+                break
+        if not has_weight_header:
+            continue
+
+        # Column headers with percentages are typically in row 1 (due to merged cells in row 0)
+        # Scan rows 0-1 for cells containing "item_name N%"
+        result = {}
+        pattern = re.compile(r'(.+?)\s*(\d+(?:\.\d+)?)\s*%')
+
+        for row_idx in range(min(len(grid), 3)):
+            row = grid[row_idx]
+            for c in range(len(row)):
+                cell = row[c]
+                if cell is None:
+                    continue
+                text = str(cell.get('text', '')).strip()
+                m = pattern.match(text)
+                if m:
+                    item_name = m.group(1).strip()
+                    pct = float(m.group(2))
+                    # Only keep the first occurrence of each item name
+                    if item_name not in result and 0 < pct <= 100:
+                        result[item_name] = pct
+
+        if result:
+            return result
 
     return None
+
+
+def _match_score_weights(score_columns, item_weights_map):
+    """Match score column names to weight percentages via fuzzy matching.
+
+    Returns dict: {col_name: weight_pct, ...}
+    Columns named '总评' are excluded.
+    """
+    if not item_weights_map:
+        return {}
+
+    result = {}
+    for col in score_columns:
+        norm_col = _normalize_item_name(col)
+        if norm_col in ('总评', '总分'):
+            continue
+
+        # Level 1: exact match after normalization
+        for item_name, pct in item_weights_map.items():
+            if _normalize_item_name(item_name) == norm_col:
+                result[col] = pct
+                break
+        if col in result:
+            continue
+
+        # Level 2: substring containment
+        for item_name, pct in item_weights_map.items():
+            norm_item = _normalize_item_name(item_name)
+            if len(norm_item) >= 2 and (norm_item in norm_col or norm_col in norm_item):
+                result[col] = pct
+                break
+        if col in result:
+            continue
+
+        # Level 3: character Jaccard similarity
+        best_match = None
+        best_score = 0.0
+        col_chars = set(norm_col)
+        for item_name, pct in item_weights_map.items():
+            norm_item = _normalize_item_name(item_name)
+            item_chars = set(norm_item)
+            if not col_chars or not item_chars:
+                continue
+            jaccard = len(col_chars & item_chars) / len(col_chars | item_chars)
+            if jaccard > 0.6 and jaccard > best_score:
+                best_score = jaccard
+                best_match = pct
+        if best_match is not None:
+            result[col] = best_match
+
+    return result
+
+
+def _normalize_scores_to_hundred(scores, weight_pct):
+    """Detect score format and normalize to 百分制 (0-100 scale).
+
+    Detection: if max(score) > weight_pct, scores are already in 百分制.
+    Otherwise, they are weighted scores that need conversion.
+
+    Returns (normalized_scores, is_weighted).
+    """
+    if not scores:
+        return scores, False
+
+    max_score = max(scores)
+    if max_score > weight_pct + 1:
+        # Already in 百分制 (e.g., 85 > 10)
+        return scores, False
+    else:
+        # Weighted scores, convert to 百分制
+        factor = 100.0 / weight_pct
+        normalized = [round(s * factor, 2) for s in scores]
+        return normalized, True
+
+
+def _match_score_column(col_name, item_segments_map):
+    """Find the best-matching item segments for a score column name.
+
+    Three-level fuzzy matching:
+      1. Exact match after normalization
+      2. Substring containment (bidirectional)
+      3. Character Jaccard similarity > 0.6
+
+    Returns segments list or None.
+    """
+    if not item_segments_map:
+        return None
+
+    norm_col = _normalize_item_name(col_name)
+
+    # Level 1: exact match after normalization
+    for item_name, segments in item_segments_map.items():
+        if _normalize_item_name(item_name) == norm_col:
+            return segments
+
+    # Level 2: substring containment
+    for item_name, segments in item_segments_map.items():
+        norm_item = _normalize_item_name(item_name)
+        if len(norm_item) >= 2 and (norm_item in norm_col or norm_col in norm_item):
+            return segments
+
+    # Level 3: character Jaccard similarity
+    best_match = None
+    best_score = 0.0
+    col_chars = set(norm_col)
+    for item_name, segments in item_segments_map.items():
+        norm_item = _normalize_item_name(item_name)
+        item_chars = set(norm_item)
+        if not col_chars or not item_chars:
+            continue
+        jaccard = len(col_chars & item_chars) / len(col_chars | item_chars)
+        if jaccard > 0.6 and jaccard > best_score:
+            best_score = jaccard
+            best_match = segments
+
+    return best_match
 
 
 def _find_name_column_index(headers):
@@ -147,12 +369,16 @@ def _parse_score(val):
         return None
 
 
-def _analyze_grades(headers, rows, segments=None):
+def _analyze_grades(headers, rows, segments_by_column=None, fallback_segments=None,
+                    column_weights=None):
     """Compute statistics for each numeric score column.
 
     Args:
-        segments: Optional list of dicts [{'label', 'lo', 'hi'}] from syllabus.
-                  If None or empty, falls back to hardcoded SCORE_BUCKETS.
+        segments_by_column: Optional dict mapping column name → segments list.
+        fallback_segments: Optional segments list for unmatched columns.
+        column_weights: Optional dict mapping column name → weight percentage.
+            When a column has weight_pct and scores appear to be weighted
+            (max ≤ weight_pct), they are normalized to 百分制 (0-100 scale).
     """
     name_col_index = _find_name_column_index(headers)
     score_columns = []
@@ -160,9 +386,6 @@ def _analyze_grades(headers, rows, segments=None):
         col_values = [row.get(col) for row in rows if col in row]
         if _is_score_column(col, col_values, i, name_col_index):
             score_columns.append(col)
-
-    # Build segment definitions
-    use_segments = segments if segments else SCORE_BUCKETS
 
     analysis = {}
     for col in score_columns:
@@ -173,14 +396,25 @@ def _analyze_grades(headers, rows, segments=None):
         if not scores:
             continue
 
+        # Normalize scores to 百分制 if column has a weight
+        is_weighted = False
+        weight_pct = column_weights.get(col) if column_weights else None
+        if weight_pct and weight_pct > 0:
+            scores, is_weighted = _normalize_scores_to_hundred(scores, weight_pct)
+
+        # Determine segments for this column
+        col_segments = None
+        if segments_by_column:
+            col_segments = segments_by_column.get(col)
+        if not col_segments:
+            col_segments = fallback_segments
+        if not col_segments:
+            col_segments = _default_segments()
+
         dist = {}
-        if segments:
-            for seg in segments:
-                count = sum(1 for s in scores if seg['lo'] <= s < seg['hi'])
-                dist[seg['label']] = {'label': seg['label'], 'count': count}
-        else:
-            for key, label, lo, hi in SCORE_BUCKETS:
-                dist[key] = {'label': label, 'count': sum(1 for s in scores if lo <= s < hi)}
+        for seg in col_segments:
+            count = sum(1 for s in scores if seg['lo'] <= s < seg['hi'])
+            dist[seg['label']] = {'label': seg['label'], 'count': count}
 
         pass_count = sum(1 for s in scores if s >= 60)
         analysis[col] = {
@@ -193,6 +427,8 @@ def _analyze_grades(headers, rows, segments=None):
             'stdev': round(statistics.stdev(scores), 2) if len(scores) > 1 else 0,
             'pass_rate': round(pass_count / len(scores) * 100, 1) if scores else 0,
             'distribution': dist,
+            'is_weighted': is_weighted,
+            'weight_pct': weight_pct,
         }
 
     return analysis
@@ -370,9 +606,12 @@ def _generate_ai_summary(section):
 def generate_module_4(grades_file, user_id, evaluation_standards=None):
     """Generate Module 4: Evaluation Results (grade analysis).
 
+    Each score column is matched against evaluation criteria tables from the
+    syllabus so that different columns can use different score-segment labels
+    (e.g. "优秀/良好/中等/合格/不合格" for 课堂表现 vs "A/B/C/D/F" for 作业).
+
     Args:
         evaluation_standards: Optional list of blocks from syllabus parsing.
-            Used to extract score segment definitions dynamically.
     """
     if not grades_file:
         return {
@@ -385,23 +624,71 @@ def generate_module_4(grades_file, user_id, evaluation_standards=None):
         }
 
     grades_data = get_effective_data(grades_file, user_id)
-    segments = _extract_score_segments(evaluation_standards)
-    fallback = segments is None
 
-    # Build segment_labels for table header
-    if segments:
-        segment_labels = [s['label'] for s in segments]
+    # Extract per-item segment definitions from syllabus evaluation tables
+    item_segments_map = _extract_score_segments_by_item(evaluation_standards)
+    fallback = item_segments_map is None
+
+    # Determine fallback segments (first table's segments, or SCORE_BUCKETS)
+    if item_segments_map:
+        fallback_segments = next(iter(item_segments_map.values()), None)
     else:
-        segment_labels = [label for _, label, _, _ in SCORE_BUCKETS]
+        fallback_segments = None
 
-    grade_analysis = _analyze_grades(grades_data['headers'], grades_data['rows'], segments)
+    # Extract column weight percentages from syllabus
+    item_weights_map = _extract_score_weights(evaluation_standards)
+
+    # Match each score column to its corresponding evaluation item
+    segments_by_column = {}
+    if item_segments_map:
+        headers = grades_data['headers']
+        rows = grades_data['rows']
+        name_col_index = _find_name_column_index(headers)
+        score_columns = []
+        for i, col in enumerate(headers):
+            col_values = [row.get(col) for row in rows if col in row]
+            if _is_score_column(col, col_values, i, name_col_index):
+                score_columns.append(col)
+                matched = _match_score_column(col, item_segments_map)
+                if matched is not None:
+                    segments_by_column[col] = matched
+    else:
+        headers = grades_data['headers']
+        rows = grades_data['rows']
+        name_col_index = _find_name_column_index(headers)
+        score_columns = []
+        for i, col in enumerate(headers):
+            col_values = [row.get(col) for row in rows if col in row]
+            if _is_score_column(col, col_values, i, name_col_index):
+                score_columns.append(col)
+
+    # Match score columns to their weight percentages
+    column_weights = _match_score_weights(score_columns, item_weights_map) if item_weights_map else {}
+
+    grade_analysis = _analyze_grades(
+        grades_data['headers'], grades_data['rows'],
+        segments_by_column=segments_by_column if segments_by_column else None,
+        fallback_segments=fallback_segments,
+        column_weights=column_weights if column_weights else None,
+    )
+
+    # Build segment_labels as the union of all labels used across all columns
+    all_labels = set()
+    for stats in grade_analysis.values():
+        for dist in stats['distribution'].values():
+            all_labels.add(dist['label'])
 
     # Build new sections format (without AI summaries first)
     sections = []
-    future_tasks = []  # (section_index, callable) for parallel AI generation
+    future_tasks = []
 
     for col_name, stats in grade_analysis.items():
-        desc1 = f'学生{col_name}成绩统计'
+        # Build description with weight info if available
+        weight_pct = stats.get('weight_pct')
+        if weight_pct:
+            desc1 = f'学生{col_name}成绩统计（占总评{weight_pct:.0f}%）'
+        else:
+            desc1 = f'学生{col_name}成绩统计'
         desc2 = f'学生课程{col_name}成绩分布如下表所示'
 
         section_segments = []
@@ -413,6 +700,14 @@ def generate_module_4(grades_file, user_id, evaluation_standards=None):
                 'count': dist['count'],
                 'pct': pct,
             })
+
+        # Determine segment source for UI display
+        if segments_by_column and col_name in segments_by_column:
+            segment_source = 'matched'
+        elif fallback_segments:
+            segment_source = 'fallback'
+        else:
+            segment_source = 'default'
 
         section_data = {
             'col_name': col_name,
@@ -431,9 +726,11 @@ def generate_module_4(grades_file, user_id, evaluation_standards=None):
             'segments': section_segments,
             'avg_score': stats['avg'],
             'ai_summary': '',
+            'segment_source': segment_source,
+            'weight_pct': weight_pct,
+            'is_weighted': stats.get('is_weighted', False),
         }
         sections.append(section_data)
-        # Prepare AI summary task for parallel execution
         future_tasks.append((len(sections) - 1, section_data))
 
     # Generate AI summaries in parallel (best-effort, non-blocking)
@@ -450,15 +747,15 @@ def generate_module_4(grades_file, user_id, evaluation_standards=None):
                 try:
                     sections[idx]['ai_summary'] = future.result()
                 except Exception:
-                    pass  # keep empty string
+                    pass
         except TimeoutError:
-            pass  # AI summaries are best-effort, don't block the response
+            pass
         finally:
             executor.shutdown(wait=False)
 
     return {
         'sections': sections,
-        'segment_labels': segment_labels,
+        'segment_labels': sorted(all_labels) if all_labels else [],
         'generated': bool(grade_analysis),
         'fallback': fallback,
         'grade_analysis': grade_analysis,

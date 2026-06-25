@@ -123,7 +123,7 @@ function removeBlock(idx: number) {
 </script>
 
 <template>
-  <div v-loading="loading" element-loading-text="生成中..." element-loading-fullscreen element-loading-lock>
+  <div v-loading.fullscreen.lock="loading" element-loading-text="生成中...">
     <template v-if="isLegacy">
       <el-input
         :model-value="legacyText"
@@ -158,7 +158,7 @@ function removeBlock(idx: number) {
                     :colspan="cell.colspan"
                     :rowspan="cell.rowspan"
                     :style="{
-                      border: '1px solid #dcdfe6',
+                      border: '1px solid #909399',
                       padding: '6px 10px',
                       verticalAlign: 'middle',
                       textAlign: 'center',

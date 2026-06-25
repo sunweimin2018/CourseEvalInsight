@@ -30,7 +30,7 @@ const readonly = computed(() => props.status === 'confirmed')
 </script>
 
 <template>
-  <div v-loading="loading" element-loading-text="生成中..." element-loading-fullscreen element-loading-lock>
+  <div v-loading.fullscreen.lock="loading" element-loading-text="生成中...">
     <el-input
       :model-value="text"
       type="textarea"

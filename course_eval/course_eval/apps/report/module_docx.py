@@ -222,8 +222,35 @@ def _render_module_4_to_docx(doc, module_4_data):
     sections = module_4_data.get('sections')
 
     if sections:
+        # Top-level fallback alert
+        if module_4_data.get('fallback'):
+            p = doc.add_paragraph()
+            _run_font(p.add_run('⚠ '), font_size=Pt(10))
+            _run_font(p.add_run(
+                '未从课程大纲中提取到考核评价标准分数段定义，已使用默认分数段（优秀/良好/中等/及格/不及格）',
+            ), font_size=Pt(10))
+
         for section in sections:
-            _add_heading(doc, section['col_name'], level=2)
+            # Build heading with weight info
+            title = section['col_name']
+            if section.get('weight_pct'):
+                title += f'（占总评{section["weight_pct"]}%）'
+            _add_heading(doc, title, level=2)
+
+            # Normalization note
+            if section.get('is_weighted'):
+                p = doc.add_paragraph()
+                _run_font(p.add_run('注：该列成绩已由折算后分数归一化至百分制'), font_size=Pt(10))
+
+            # Segment source note
+            src = section.get('segment_source', '')
+            if src == 'fallback':
+                p = doc.add_paragraph()
+                _run_font(p.add_run('注：该列使用默认分数段'), font_size=Pt(10))
+            elif src == 'default':
+                p = doc.add_paragraph()
+                _run_font(p.add_run('注：该列使用系统默认分数段'), font_size=Pt(10))
+
             _add_paragraph(doc, section['description_line_1'])
             _add_paragraph(doc, section['description_line_2'])
 

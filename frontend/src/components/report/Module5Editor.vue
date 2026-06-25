@@ -44,7 +44,7 @@ function emitUpdate() {
 </script>
 
 <template>
-  <div v-loading="loading" element-loading-text="生成中..." element-loading-fullscreen element-loading-lock>
+  <div v-loading.fullscreen.lock="loading" element-loading-text="生成中...">
     <!-- 4.1 -->
     <h3 style="margin-top: 0">4.1 连续两年课程评价结果系统地纳入课程持续改进的措施及其效果描述</h3>
     <el-input

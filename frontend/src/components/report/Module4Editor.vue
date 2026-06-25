@@ -51,13 +51,13 @@ function sectionBarChartOption(section: GradeSection): EChartsOption | undefined
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: segs.map((s) => s.label), axisLabel: { rotate: 15 } },
     yAxis: { type: 'value' },
-    series: [{ data: segs.map((s) => s.count), type: 'bar', itemStyle: { color: '#409eff' } }],
+    series: [{ data: segs.map((s) => s.count), type: 'bar', barMaxWidth: 36, itemStyle: { color: '#409eff' } }],
   }
 }
 </script>
 
 <template>
-  <div v-loading="loading" element-loading-text="生成中..." element-loading-fullscreen element-loading-lock>
+  <div v-loading.fullscreen.lock="loading" element-loading-text="生成中...">
     <div v-if="!data || !data.generated">
       <el-empty description="暂无成绩数据，请重新生成" />
     </div>
@@ -75,7 +75,13 @@ function sectionBarChartOption(section: GradeSection): EChartsOption | undefined
       <!-- New format: sections -->
       <template v-if="data.sections && data.sections.length > 0">
         <div v-for="section in data.sections" :key="section.col_name" class="grade-section">
-          <h3>{{ section.col_name }}</h3>
+          <h3>
+            {{ section.col_name }}
+            <el-tag v-if="section.weight_pct" size="small" type="success" style="margin-left: 8px">占总评{{ section.weight_pct }}%</el-tag>
+            <el-tag v-if="section.is_weighted" size="small" type="warning" style="margin-left: 8px">已归一化至百分制</el-tag>
+            <el-tag v-if="section.segment_source === 'fallback'" size="small" type="info" style="margin-left: 8px">使用默认分数段</el-tag>
+            <el-tag v-if="section.segment_source === 'default'" size="small" type="warning" style="margin-left: 8px">使用系统默认分数段</el-tag>
+          </h3>
           <p>{{ section.description_line_1 }}</p>
           <p>{{ section.description_line_2 }}</p>
 

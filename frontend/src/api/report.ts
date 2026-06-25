@@ -54,6 +54,9 @@ export interface GradeSection {
   segments: SegmentEntry[]
   avg_score: number
   ai_summary?: string
+  segment_source?: 'matched' | 'fallback' | 'default'
+  weight_pct?: number
+  is_weighted?: boolean
 }
 
 export interface Module4Data {

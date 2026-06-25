@@ -33,3 +33,26 @@ html, body, #app {
   margin-bottom: 30px;
   color: #303133;
 }
+
+/* 全局表格样式：加深边框、加粗表头 */
+.el-table--border {
+  border-color: #909399 !important;
+}
+.el-table--border::before,
+.el-table--border::after {
+  background-color: #909399 !important;
+}
+.el-table__inner-wrapper::before,
+.el-table__inner-wrapper::after {
+  background-color: #909399 !important;
+}
+.el-table--border td,
+.el-table--border th {
+  border-color: #909399 !important;
+}
+.el-table th {
+  font-weight: 700;
+}
+.el-table .cell {
+  font-weight: inherit;
+}

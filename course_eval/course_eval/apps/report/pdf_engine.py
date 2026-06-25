@@ -257,8 +257,31 @@ def generate_pdf(report_name, report_data):
     sections = eval_results.get('sections')
 
     if sections:
+        # Top-level fallback alert
+        if eval_results.get('fallback'):
+            story.append(_p(
+                '⚠ 未从课程大纲中提取到考核评价标准分数段定义，已使用默认分数段（优秀/良好/中等/及格/不及格）',
+                s['body'],
+            ))
+
         for section in sections:
-            story.append(_p(section['col_name'], s['h2']))
+            # Build heading with weight info
+            title = section['col_name']
+            if section.get('weight_pct'):
+                title += f'（占总评{section["weight_pct"]}%）'
+            story.append(_p(title, s['h2']))
+
+            # Normalization note
+            if section.get('is_weighted'):
+                story.append(_p('注：该列成绩已由折算后分数归一化至百分制', s['body']))
+
+            # Segment source note
+            src = section.get('segment_source', '')
+            if src == 'fallback':
+                story.append(_p('注：该列使用默认分数段', s['body']))
+            elif src == 'default':
+                story.append(_p('注：该列使用系统默认分数段', s['body']))
+
             story.append(_p(section.get('description_line_1', ''), s['body']))
             story.append(_p(section.get('description_line_2', ''), s['body']))
 

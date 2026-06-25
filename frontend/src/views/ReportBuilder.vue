@@ -273,7 +273,8 @@ function handleStepClick(num: number) {
     for (let i = 1; i <= 5; i++) {
       if (moduleStatuses.value[i] !== 'confirmed') unconfirmed.push(i)
     }
-    ElMessage.warning(`以下模块尚未确认: ${unconfirmed.map(n => `模块${n}`).join(', ')}`)
+    const names = unconfirmed.map(n => `"${steps[n - 1].title}"`).join('、')
+    ElMessage.warning(`以下模块尚未确认，请确认${names}模块`)
     activeStep.value = unconfirmed[0] || 1
     return
   }
@@ -286,7 +287,7 @@ function handleStepClick(num: number) {
 async function handleMerge(format: 'docx' | 'pdf') {
   if (!reportId.value) return
   if (!allConfirmed.value) {
-    ElMessage.warning('请先确认所有五个模块')
+    ElMessage.warning('以下模块尚未确认，请先确认所有模块')
     return
   }
   try {
