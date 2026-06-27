@@ -371,18 +371,210 @@ def generate_pdf(report_name, report_data):
         else:
             story.append(_p('暂无成绩数据', s['body']))
 
-    # ── Module 5: Improvement Plan ──────────────────────────────────────
-    story.append(_p('五、课程持续改进方案及措施', s['h1']))
-    plan = report_data.get('module_5_improvement_plan', '待后续版本实现')
+    # ── Module 5: Objective Achievement ──────────────────────────────────
+    story.append(_p('五、课程目标达成度', s['h1']))
+    obj_ach_data = report_data.get('module_5_objective_achievement', {})
+    if obj_ach_data and obj_ach_data.get('generated'):
+        objectives = obj_ach_data.get('objectives', [])
+
+        story.append(_p('课程目标达成情况计算见表6。', s['body']))
+
+        # (1) 统计分析 — Achievement table (Table 6) + Distribution table (Table 7)
+        achievement_table = obj_ach_data.get('achievement_table', [])
+        if achievement_table:
+            story.append(_p('(1) 统计分析', s['h2']))
+
+            report_title = obj_ach_data.get('report_title', '')
+            story.append(_p(f'表6   {report_title}', s['body']))
+
+            from collections import OrderedDict
+            obj_groups = OrderedDict()
+            for row in achievement_table:
+                obj = row.get('objective', '')
+                if obj not in obj_groups:
+                    obj_groups[obj] = []
+                obj_groups[obj].append(row)
+
+            for obj_name, items in obj_groups.items():
+                story.append(_p(obj_name, s['h2']))
+
+                cell_s = s['cell']
+                cell_b = s['cell_bold']
+                table_data = [[_p('评价内容', cell_b), _p('目标分值', cell_b),
+                              _p('平均得分', cell_b), _p('权重系数', cell_b),
+                              _p('课程目标达成情况', cell_b)]]
+                for row in items:
+                    table_data.append([
+                        _p(row.get('item', ''), cell_s),
+                        _p(str(row.get('target_score', '')), cell_s),
+                        _p(str(row.get('avg_score', '')), cell_s),
+                        _p(row.get('weight_pct', ''), cell_s),
+                        _p(row.get('achievement_rate', ''), cell_s),
+                    ])
+
+                col_w = [80, 60, 60, 60, 60]
+                tbl = Table(table_data, colWidths=col_w)
+                tbl.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D9E2F3')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ]))
+                story.append(tbl)
+                story.append(Spacer(1, 3 * mm))
+
+        # Table 7: Distribution
+        distribution_table = obj_ach_data.get('distribution_table')
+        if distribution_table and distribution_table.get('objectives'):
+            story.append(_p('表7  各课程目标的达成情况和分布表', s['body']))
+
+            obj_names = distribution_table['objectives']
+            dist_rows = distribution_table.get('rows', [])
+            num_obj = len(obj_names)
+            num_cols = 1 + num_obj * 2
+
+            header_row = [_p('达成度分布', s['cell_bold'])]
+            for obj_name in obj_names:
+                header_row.append(_p(f'{obj_name}（人数）', s['cell_bold']))
+                header_row.append(_p(f'{obj_name}（比例）', s['cell_bold']))
+
+            table_data = [header_row]
+            for dist_row in dist_rows:
+                row_data = [_p(dist_row['label'], s['cell_bold'])]
+                for oi in range(num_obj):
+                    row_data.append(_p(str(dist_row.get('counts', [0]*num_obj)[oi]), s['cell_center']))
+                    row_data.append(_p(f"{dist_row.get('pcts', [0]*num_obj)[oi]}%", s['cell_center']))
+                table_data.append(row_data)
+
+            col_w = [70] + [50, 50] * num_obj
+            tbl = Table(table_data, colWidths=col_w, repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D9E2F3')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            story.append(tbl)
+            story.append(Spacer(1, 3 * mm))
+
+        # (2) 图形分析 — per-objective charts (best-effort)
+        charts_added = False
+
+        # Chart 1: 课程目标达成情况
+        try:
+            from .module_docx import _generate_obj_achievement_summary_chart as _gen_chart1
+            chart1_buf = _gen_chart1(obj_ach_data)
+            if chart1_buf:
+                if not charts_added:
+                    story.append(_p('(2) 图形分析', s['h2']))
+                    charts_added = True
+                img = Image(chart1_buf, width=120 * mm, height=80 * mm)
+                story.append(img)
+                caption = _p('图：课程目标达成情况', s['body'])
+                caption.alignment = TA_CENTER
+                story.append(caption)
+                story.append(Spacer(1, 3 * mm))
+        except Exception:
+            pass
+
+        # Distribution charts per objective
+        if distribution_table and distribution_table.get('objectives'):
+            for obj_name in distribution_table['objectives']:
+                try:
+                    from .module_docx import _generate_achievement_chart as _gen_chart
+                    chart_buf = _gen_chart(obj_name, obj_ach_data)
+                    if chart_buf:
+                        if not charts_added:
+                            story.append(_p('(2) 图形分析', s['h2']))
+                            charts_added = True
+                        img = Image(chart_buf, width=120 * mm, height=80 * mm)
+                        story.append(img)
+                        caption = _p(f'图：{obj_name}达成度分布', s['body'])
+                        caption.alignment = TA_CENTER
+                        story.append(caption)
+                        story.append(Spacer(1, 3 * mm))
+                except Exception:
+                    pass
+
+        # (3) 教学班整体课程目标达成情况分析
+        per_objective_analysis = obj_ach_data.get('per_objective_analysis', [])
+        if per_objective_analysis:
+            story.append(_p('(3) 教学班整体课程目标达成情况分析', s['h2']))
+            labels = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧']
+            for i, poa in enumerate(per_objective_analysis):
+                label = labels[i] if i < len(labels) else f'({i+1})'
+                story.append(_p(f'{label}{poa.get("objective", "")}的达成情况分析', s['h2']))
+                analysis_text = poa.get('analysis', '')
+                if analysis_text:
+                    for line in analysis_text.split('\n'):
+                        if line.strip():
+                            story.append(_p(line.strip(), s['body']))
+
+        # (4) 学生个体课程目标达成情况分析
+        low_students = obj_ach_data.get('low_students', [])
+        if low_students:
+            story.append(_p('(4) 学生个体课程目标达成情况分析', s['h2']))
+            story.append(_p('需要关注及跟踪的学生', s['h2']))
+            story.append(_p('表8  未达成课程目标学生汇总表', s['body']))
+
+            cell_s = s['cell']
+            cell_b = s['cell_bold']
+            header = [_p('姓名', cell_b)]
+            for obj_name in objectives:
+                header.append(_p(f'{obj_name}达成度', cell_b))
+
+            table_data = [header]
+            for student in low_students:
+                row_data = [_p(student['name'], cell_s)]
+                achievements = student.get('achievements', {})
+                for obj_name in objectives:
+                    val = achievements.get(obj_name, 0)
+                    row_data.append(_p(str(val), cell_s))
+                table_data.append(row_data)
+
+            col_w = [60] + [80] * len(objectives)
+            tbl = Table(table_data, colWidths=col_w, repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D9E2F3')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            story.append(tbl)
+            story.append(Spacer(1, 3 * mm))
+            story.append(_p('以上几位学生在课程目标的达成度上较低，需要重点关注与跟踪。', s['body']))
+
+        # Student scatter chart
+        try:
+            from .module_docx import _generate_student_scatter_chart as _gen_scatter
+            scatter_buf = _gen_scatter(obj_ach_data)
+            if scatter_buf:
+                story.append(Spacer(1, 5 * mm))
+                img = Image(scatter_buf, width=140 * mm, height=70 * mm)
+                story.append(img)
+                caption = _p('图：学生个体课程目标达成度分布', s['body'])
+                caption.alignment = TA_CENTER
+                story.append(caption)
+        except Exception:
+            pass
+    else:
+        story.append(_p('暂无课程目标达成度数据。', s['body']))
+
+    # ── Module 6: Improvement Plan ──────────────────────────────────────
+    story.append(_p('六、课程持续改进方案及措施', s['h1']))
+    plan = report_data.get('module_6_improvement_plan', {})
     if isinstance(plan, dict):
-        # 4.1
-        story.append(_p('4.1 连续两年课程评价结果系统地纳入课程持续改进的措施及其效果描述', s['h2']))
+        # 6.1
+        story.append(_p('6.1 连续两年课程评价结果系统地纳入课程持续改进的措施及其效果描述', s['h2']))
         for line in plan.get('part1', '').split('\n'):
             if line.strip():
                 story.append(_p(line.strip(), s['body']))
 
-        # 4.2
-        story.append(_p('4.2 本年度课程教学环节发现的问题、相应持续改进的措施以及描述预期将可能达到的效果', s['h2']))
+        # 6.2
+        story.append(_p('6.2 本年度课程教学环节发现的问题、相应持续改进的措施以及描述预期将可能达到的效果', s['h2']))
         part2 = plan.get('part2', {})
         if isinstance(part2, dict):
             story.append(_p('(1) 存在的问题', s['h2']))
@@ -400,8 +592,8 @@ def generate_pdf(report_name, report_data):
         else:
             story.append(_p(str(part2), s['body']))
 
-        # 4.3
-        story.append(_p('4.3 其他可用的协助持续改进的资源', s['h2']))
+        # 6.3
+        story.append(_p('6.3 其他可用的协助持续改进的资源', s['h2']))
         for line in plan.get('part3', '').split('\n'):
             if line.strip():
                 story.append(_p(line.strip(), s['body']))

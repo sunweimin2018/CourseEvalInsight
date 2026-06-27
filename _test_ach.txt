@@ -1,0 +1,6 @@
+目标1:
+  课堂表现: col_avg=85.5 tgt=4.0 total=10.0 avg_score=34.2
+  课后作业: col_avg=78.2 tgt=10.0 total=20.0 avg_score=39.1
+  期末考试: col_avg=65.0 tgt=12.0 total=40.0 avg_score=19.5
+  sum(avg)=92.80000000000001 sum(tgt)=26.0
+  achievement_rate=356.92%

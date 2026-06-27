@@ -14,4 +14,8 @@ urlpatterns = [
 
     # Merge endpoint
     path('<int:pk>/merge/', views.ReportMergeView.as_view(), name='report-merge'),
+
+    # Module 5 Excel generation and download
+    path('<int:pk>/module/5/generate-excel/', views.Module5ExcelGenerateView.as_view(), name='module5-excel-generate'),
+    path('<int:pk>/module/5/download-excel/', views.Module5ExcelDownloadView.as_view(), name='module5-excel-download'),
 ]

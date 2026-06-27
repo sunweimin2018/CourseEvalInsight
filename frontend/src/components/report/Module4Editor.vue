@@ -88,7 +88,7 @@ function sectionBarChartOption(section: GradeSection): EChartsOption | undefined
           <el-table
             :data="buildTableRows(section)"
             border
-            style="margin-bottom: 20px; width: 100%"
+            style="margin-bottom: 20px"
           >
             <el-table-column prop="label" label="类别" width="100" fixed />
             <el-table-column

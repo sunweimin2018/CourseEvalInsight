@@ -12,6 +12,7 @@ class ReportRecordSerializer(serializers.ModelSerializer):
     module_3_status_display = serializers.CharField(source='get_module_3_status_display', read_only=True)
     module_4_status_display = serializers.CharField(source='get_module_4_status_display', read_only=True)
     module_5_status_display = serializers.CharField(source='get_module_5_status_display', read_only=True)
+    module_6_status_display = serializers.CharField(source='get_module_6_status_display', read_only=True)
 
     class Meta:
         model = ReportRecord
@@ -21,10 +22,10 @@ class ReportRecordSerializer(serializers.ModelSerializer):
             'report_name', 'status', 'status_display',
             'report_file_path', 'created_time', 'updated_time',
             'module_1_status', 'module_2_status', 'module_3_status',
-            'module_4_status', 'module_5_status',
+            'module_4_status', 'module_5_status', 'module_6_status',
             'module_1_status_display', 'module_2_status_display',
             'module_3_status_display', 'module_4_status_display',
-            'module_5_status_display',
+            'module_5_status_display', 'module_6_status_display',
             'report_data',
         ]
         read_only_fields = ['id', 'created_time', 'updated_time']
@@ -43,7 +44,8 @@ class ModuleUpdateSerializer(serializers.Serializer):
         ('module_2_objectives', '2'),
         ('module_3_evaluation_standards', '3'),
         ('module_4_evaluation_results', '4'),
-        ('module_5_improvement_plan', '5'),
+        ('module_5_objective_achievement', '5'),
+        ('module_6_improvement_plan', '6'),
     ])
     data = serializers.JSONField()
     confirmed = serializers.BooleanField(default=False)

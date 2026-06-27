@@ -369,6 +369,19 @@ def _parse_score(val):
         return None
 
 
+def _parse_numeric(val, default=0.0):
+    """Parse a value that might be a string with %, or a plain number."""
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        s = str(val).replace('%', '').replace('％', '').strip()
+        return float(s) if s else default
+    except (ValueError, TypeError):
+        return default
+
+
 def _analyze_grades(headers, rows, segments_by_column=None, fallback_segments=None,
                     column_weights=None):
     """Compute statistics for each numeric score column.
@@ -763,8 +776,8 @@ def generate_module_4(grades_file, user_id, evaluation_standards=None):
     }
 
 
-def _build_module5_context(course_name, objectives, module_4):
-    """Build a context dict for Module 5 AI generation from Modules 1/2/4 data."""
+def _build_module6_context(course_name, objectives, module_4):
+    """Build a context dict for Module 6 AI generation from Modules 1/2/4 data."""
     grade_lines = []
     if module_4 and module_4.get('sections'):
         for sec in module_4['sections']:
@@ -782,7 +795,7 @@ def _build_module5_context(course_name, objectives, module_4):
     }
 
 
-def _build_module5_prompt(context):
+def _build_module6_prompt(context):
     """Build a prompt for AI to generate Module 5 continuous improvement plan."""
     course_name = context.get('course_name', '')
     objectives = context.get('objectives', '')
@@ -823,7 +836,7 @@ def _build_module5_prompt(context):
 要求：语言专业、客观、具体，基于课程实际数据进行分析和建议，避免空话套话。"""
 
 
-def _parse_module5_response(text):
+def _parse_module6_response(text):
     """Parse Zhipu response into structured Module 5 data.
 
     Uses 【第N部分】 markers to split the three major sections,
@@ -911,7 +924,7 @@ def _parse_module5_response(text):
     }
 
 
-def _get_fallback_module5():
+def _get_fallback_module6():
     """Structured fallback template when AI generation fails."""
     return {
         'part1': (
@@ -950,8 +963,1219 @@ def _get_fallback_module5():
     }
 
 
-def generate_module_5(context=None):
-    """Generate Module 5: Continuous Improvement Plan.
+def _parse_objective_item_mapping(evaluation_standards):
+    """Parse objective-to-evaluation-item mapping from syllabus evaluation tables.
+
+    Looks for tables whose first column header contains '课程目标' and which
+    have columns for '评价内容'/'考核项目', '目标分值', '权重' etc.
+
+    Returns list of dicts: [{'objective': str, 'item': str, 'target_score': float,
+                              'weight_pct': float}, ...]
+    or None if no mapping table found.
+    """
+    if not evaluation_standards or not isinstance(evaluation_standards, list):
+        return None
+
+    for block in evaluation_standards:
+        if block.get('type') != 'table':
+            continue
+        grid = block.get('grid')
+        if not grid or len(grid) < 2:
+            continue
+
+        header = grid[0]
+        num_cols = len(header)
+
+        # Identify columns by header text
+        obj_col = None
+        item_col = None
+        score_col = None
+        weight_col = None
+        for c in range(num_cols):
+            cell = header[c]
+            if cell is None:
+                continue
+            text = str(cell.get('text', '')).replace(' ', '').strip()
+            if '课程目标' in text and '达成' not in text:
+                obj_col = c
+            elif '评价' in text or '考核' in text or '项目' in text:
+                item_col = c
+            elif '目标分值' in text or '分值' in text:
+                score_col = c
+            elif '权重' in text or '比例' in text or '系数' in text:
+                weight_col = c
+
+        # Need at least objective and item columns
+        if obj_col is None or item_col is None:
+            continue
+
+        result = []
+        for r in range(1, len(grid)):
+            row = grid[r]
+            if obj_col >= len(row) or item_col >= len(row):
+                continue
+
+            obj_cell = row[obj_col]
+            item_cell = row[item_col]
+            if obj_cell is None or item_cell is None:
+                continue
+
+            objective = str(obj_cell.get('text', '')).strip()
+            item = str(item_cell.get('text', '')).strip()
+            if not objective or not item:
+                continue
+
+            target_score = None
+            if score_col is not None and score_col < len(row) and row[score_col]:
+                try:
+                    target_score = float(str(row[score_col].get('text', '')).strip())
+                except ValueError:
+                    pass
+
+            weight_pct = None
+            if weight_col is not None and weight_col < len(row) and row[weight_col]:
+                import re
+                wt_text = str(row[weight_col].get('text', '')).strip()
+                m = re.search(r'(\d+(?:\.\d+)?)\s*%', wt_text)
+                if m:
+                    weight_pct = float(m.group(1))
+                else:
+                    try:
+                        weight_pct = float(wt_text)
+                    except ValueError:
+                        pass
+
+            result.append({
+                'objective': objective,
+                'item': item,
+                'target_score': target_score,
+                'weight_pct': weight_pct,
+            })
+
+        if result:
+            return result
+
+    return None
+
+
+def _clean_eval_item_name(name):
+    """Remove trailing percentage suffix from evaluation item column headers.
+
+    e.g. "课堂表现 10%" → "课堂表现", "上机实验30%" → "上机实验"
+    """
+    import re
+    return re.sub(r'\s*\d+%$', '', name).strip()
+
+
+def _parse_wide_eval_table(evaluation_standards):
+    """Parse wide-format evaluation standards table from syllabus.
+
+    Locates the first table whose header column contains '课程目标' (the
+    "考核环节构成及成绩比例" table) and extracts:
+      - evaluation item names (cleaned column headers)
+      - weight percentages per objective×item (intersection cell values)
+      - overall achievement rate per objective (成绩比例 column total)
+
+    Handles two table layouts:
+      Simple:  Row 0 cols 1+ = evaluation item names, data starts at Row 1
+      Two-level: Row 0 has a spanning header (e.g. "评价依据及成绩比例(%)"),
+                 Row 1 has the actual item names, data starts at Row 2
+
+    Returns list of dicts:
+        [{objective, items: [{item, weight_pct}, ...], achievement_rate}, ...]
+    or None if no suitable table found.
+    """
+    import re
+
+    if not evaluation_standards or not isinstance(evaluation_standards, list):
+        return None
+
+    spanning_keywords = ['评价依据', '考核方式', '评价方式', '考核依据']
+    total_keywords = ['成绩比例', '比例', '合计']
+
+    for block in evaluation_standards:
+        if block.get('type') != 'table':
+            continue
+        grid = block.get('grid')
+        if not grid or len(grid) < 2:
+            continue
+
+        row0 = grid[0]
+        num_cols = len(row0)
+
+        # ── Locate the "课程目标" column ──
+        course_obj_col = None
+        for c in range(min(3, num_cols)):
+            cell = row0[c]
+            if cell is None:
+                continue
+            text = str(cell.get('text', '')).replace(' ', '').strip()
+            if '课程目标' in text:
+                course_obj_col = c
+                break
+
+        if course_obj_col is None:
+            continue
+
+        # ── Determine header layout (simple vs two-level) ──
+        is_two_level = False
+        span_start = None   # first col index covered by the spanning header
+        span_end = None     # exclusive end (span_start + colspan)
+
+        # Check 1: colspan
+        for c in range(course_obj_col + 1, num_cols):
+            cell = row0[c]
+            if cell is None:
+                continue
+            if cell.get('colspan', 1) > 1:
+                is_two_level = True
+                span_start = c
+                span_end = c + cell['colspan']
+                break
+
+        # Check 2: spanning keywords in text + colspan>1
+        if not is_two_level:
+            for c in range(course_obj_col + 1, num_cols):
+                cell = row0[c]
+                if cell is None:
+                    continue
+                cs = cell.get('colspan', 1)
+                text = str(cell.get('text', '')).replace(' ', '').strip()
+                if any(kw in text for kw in spanning_keywords) and cs > 1:
+                    is_two_level = True
+                    span_start = c
+                    span_end = c + cs
+                    break
+
+        # Check 3: Row 1 structural hints
+        if not is_two_level and len(grid) >= 3:
+            row1 = grid[1]
+            if len(row1) > course_obj_col:
+                r1c = row1[course_obj_col]
+                if r1c is None or str(r1c.get('text', '')).strip() == '课程目标':
+                    is_two_level = True
+                    span_start = course_obj_col + 1
+                    span_end = num_cols
+
+        if is_two_level and len(grid) >= 3:
+            sub_header_row = grid[1]
+            data_start = 2
+
+            # Build eval column map: {col_index: clean_item_name}
+            eval_cols = {}   # col_index → clean_name
+            total_col = None
+
+            for c in range(course_obj_col + 1, num_cols):
+                if c >= len(sub_header_row):
+                    continue
+                cell = sub_header_row[c]
+                cell_text = str(cell.get('text', '')).strip() if cell else ''
+
+                in_span = (span_start is not None and span_start <= c < span_end)
+
+                if in_span and cell_text:
+                    eval_cols[c] = _clean_eval_item_name(cell_text)
+                elif not in_span:
+                    # Check if this is a total / 成绩比例 column
+                    row0_cell = row0[c] if c < len(row0) else None
+                    row0_text = str(row0_cell.get('text', '')).strip() if row0_cell else ''
+                    if any(kw in row0_text for kw in total_keywords):
+                        total_col = c
+                    elif not cell_text and row0_text:
+                        # sub-header empty but main header has content
+                        total_col = c
+        else:
+            # Simple: Row 0 cols after course_obj_col are the item names
+            item_names = {}
+            total_col = None
+            for c in range(course_obj_col + 1, num_cols):
+                cell = row0[c]
+                if cell is None:
+                    continue
+                text = str(cell.get('text', '')).strip()
+                if not text:
+                    continue
+                if any(kw in text for kw in total_keywords):
+                    total_col = c
+                else:
+                    item_names[c] = _clean_eval_item_name(text)
+
+            eval_cols = item_names
+            data_start = 1
+
+        if not eval_cols:
+            continue
+
+        # ── Parse data rows ──
+        result = []
+        for r in range(data_start, len(grid)):
+            row = grid[r]
+            if not row or len(row) == 0:
+                continue
+
+            obj_cell = row[course_obj_col]
+            if obj_cell is None:
+                continue
+            objective = str(obj_cell.get('text', '')).strip()
+            if not objective:
+                continue
+            if objective == '课程目标':
+                continue
+            if '合计' in objective:
+                continue
+
+            items = []
+            for col_idx, item_name in eval_cols.items():
+                if col_idx >= len(row):
+                    continue
+                cell = row[col_idx]
+                if cell is None:
+                    continue
+                cell_text = str(cell.get('text', '')).strip()
+                if cell_text:
+                    items.append({
+                        'item': item_name,
+                        'weight_pct': cell_text,
+                    })
+
+            # Extract achievement_rate from total column
+            achievement_rate = '0%'
+            if total_col is not None and total_col < len(row):
+                total_cell = row[total_col]
+                if total_cell is not None:
+                    total_text = str(total_cell.get('text', '')).strip()
+                    if total_text:
+                        achievement_rate = total_text
+
+            if items:
+                result.append({
+                    'objective': objective,
+                    'items': items,
+                    'achievement_rate': achievement_rate,
+                })
+
+        if result:
+            return result
+
+    return None
+
+
+def _parse_eval_item_totals(evaluation_standards):
+    """Extract the 合计 (total) row values from the wide-format evaluation table.
+
+    Returns a dict mapping clean item name → numeric total value,
+    e.g. {'课堂表现': 10, '课后作业': 20, '上机实验': 30, '期末考试': 40}
+    Returns None if the 合计 row cannot be found.
+    """
+    if not evaluation_standards or not isinstance(evaluation_standards, list):
+        return None
+
+    for block in evaluation_standards:
+        if block.get('type') != 'table':
+            continue
+        grid = block.get('grid')
+        if not grid or len(grid) < 3:
+            continue
+
+        # Find the 合计 row and the column headers
+        row0 = grid[0]
+        num_cols = len(row0)
+        course_obj_col = None
+        for c in range(min(3, num_cols)):
+            cell = row0[c]
+            if cell is None:
+                continue
+            if '课程目标' in str(cell.get('text', '')).replace(' ', '').strip():
+                course_obj_col = c
+                break
+        if course_obj_col is None:
+            continue
+
+        # Determine eval item columns (same logic as _parse_wide_eval_table)
+        is_two_level = False
+        span_start, span_end = None, None
+        for c in range(course_obj_col + 1, num_cols):
+            cell = row0[c]
+            if cell is None:
+                continue
+            if cell.get('colspan', 1) > 1:
+                is_two_level = True
+                span_start = c
+                span_end = c + cell['colspan']
+                break
+
+        if not is_two_level and len(grid) >= 3:
+            row1 = grid[1]
+            if len(row1) > course_obj_col and row1[course_obj_col] is None:
+                is_two_level = True
+                span_start = course_obj_col + 1
+                span_end = num_cols
+
+        # Build eval_cols map
+        eval_cols = {}
+        if is_two_level:
+            sub_header_row = grid[1]
+            for c in range(course_obj_col + 1, num_cols):
+                if c >= len(sub_header_row):
+                    continue
+                cell = sub_header_row[c]
+                text = str(cell.get('text', '')).strip() if cell else ''
+                if span_start is not None and span_start <= c < span_end and text:
+                    eval_cols[c] = _clean_eval_item_name(text)
+        else:
+            for c in range(course_obj_col + 1, num_cols):
+                cell = row0[c]
+                if cell is None:
+                    continue
+                text = str(cell.get('text', '')).strip()
+                if text and '合计' not in text and '比例' not in text:
+                    eval_cols[c] = _clean_eval_item_name(text)
+
+        if not eval_cols:
+            continue
+
+        # Find the 合计 row — check any cell whose text contains '合计'
+        for r in range(1, len(grid)):
+            row = grid[r]
+            if not row:
+                continue
+            is_total_row = False
+            for c in range(min(3, len(row))):
+                cell = row[c]
+                if cell is not None and '合计' in str(cell.get('text', '')):
+                    is_total_row = True
+                    break
+            if is_total_row:
+                totals = {}
+                for col_idx, item_name in eval_cols.items():
+                    if col_idx < len(row) and row[col_idx] is not None:
+                        val_text = str(row[col_idx].get('text', '')).strip()
+                        totals[item_name] = _parse_weight_pct_to_target(val_text)
+                return totals if totals else None
+
+    return None
+
+
+def _parse_weight_pct_to_target(weight_pct):
+    """Convert a weight_pct value to a target_score numeric value.
+
+    '4%' → 4.0,  '26%' → 26.0,  0.04 → 4.0,  None → 0
+    """
+    if weight_pct is None:
+        return 0
+    if isinstance(weight_pct, (int, float)):
+        return round(weight_pct * 100, 1) if weight_pct < 1 else float(weight_pct)
+    s = str(weight_pct).strip().replace('%', '').strip()
+    try:
+        val = float(s)
+        return round(val * 100, 1) if val < 1 else val
+    except (ValueError, TypeError):
+        return 0
+
+
+def _generate_section_5_1(evaluation_standards, semester_name=''):
+    """Generate section 5.1 data: 课程目标达成情况 summary table.
+
+    Extracts objective-to-item mapping from evaluation standards tables
+    (supporting both long-format and wide-format) and builds the table
+    structure with placeholder 0 values for computed fields.
+
+    Returns dict with:
+        semester_name: str
+        title: str (centered title line)
+        objectives: [{name, items: [{item, target_score, avg_score, weight_pct}], achievement_rate}]
+    """
+    # Try wide-format first, then long-format mapping
+    wide_data = _parse_wide_eval_table(evaluation_standards)
+
+    if wide_data:
+        objectives = []
+        for entry in wide_data:
+            items = []
+            total_weight = 0.0
+            for item_entry in entry['items']:
+                if isinstance(item_entry, str):
+                    # Legacy format: items are plain strings
+                    items.append({'item': item_entry, 'target_score': 0, 'avg_score': 0, 'weight_pct': '0%'})
+                else:
+                    wp = item_entry.get('weight_pct', '0%')
+                    ts = _parse_weight_pct_to_target(wp)
+                    total_weight += ts
+                    items.append({
+                        'item': item_entry['item'],
+                        'target_score': ts,
+                        'avg_score': 0,
+                        'weight_pct': wp,
+                    })
+            # achievement_rate = sum of weight percentage values
+            achievement_rate = f'{total_weight:.1f}%' if total_weight == int(total_weight) else f'{total_weight}%'
+            if achievement_rate.endswith('.0%'):
+                achievement_rate = f'{int(total_weight)}%'
+            objectives.append({
+                'name': entry['objective'],
+                'items': items,
+                'achievement_rate': achievement_rate,
+            })
+    else:
+        mapping = _parse_objective_item_mapping(evaluation_standards)
+        if mapping:
+            # Group by objective
+            from collections import OrderedDict
+            obj_groups = OrderedDict()
+            for m in mapping:
+                obj = m['objective']
+                if obj not in obj_groups:
+                    obj_groups[obj] = []
+                obj_groups[obj].append({
+                    'item': m['item'],
+                    'target_score': 0,
+                    'avg_score': 0,
+                    'weight_pct': '0%',
+                })
+            objectives = [
+                {
+                    'name': obj_name,
+                    'items': items,
+                    'achievement_rate': '0%',
+                }
+                for obj_name, items in obj_groups.items()
+            ]
+        else:
+            return None
+
+    if not objectives:
+        return None
+
+    title = f'{semester_name} 课程目标达成情况' if semester_name else '课程目标达成情况'
+
+    return {
+        'semester_name': semester_name,
+        'title': title,
+        'objectives': objectives,
+    }
+
+
+def _parse_objectives_list(objectives_text):
+    """Parse course objectives text into a list of individual objectives.
+
+    Handles numbered formats like '1. xxx', '目标1：xxx', '（1）xxx', etc.
+    """
+    import re
+    if not objectives_text or objectives_text == '未填写':
+        return []
+
+    text = objectives_text.strip()
+    # Split by common objective numbering patterns
+    patterns = [
+        r'(?:课程目标|目标|培养目标)\s*\d+\s*[：:.]',
+        r'(?:^|\n)\s*\d+\s*[、.)]',
+        r'(?:^|\n)\s*[（(]\s*\d+\s*[）)]',
+        r'(?:^|\n)\s*(?:第[一二三四五六七八九十]\s*[条部分章])',
+    ]
+
+    combined = '(' + '|'.join(patterns) + ')'
+    parts = re.split(combined, text)
+    objectives = []
+    for part in parts:
+        part = part.strip()
+        if part and len(part) > 5:
+            objectives.append(part)
+
+    if not objectives:
+        objectives = [text]
+
+    return objectives
+
+
+def _match_item_to_column(item_name, score_columns):
+    """Fuzzy-match an evaluation item name to a score column header."""
+    import re
+
+    def _norm(s):
+        return re.sub(r'[（(][^）)]*[）)]', '', s).replace(' ', '').replace('　', '').strip()
+
+    norm_item = _norm(item_name)
+    # Exact/normalized match
+    for col in score_columns:
+        if _norm(col) == norm_item:
+            return col
+    # Substring match
+    for col in score_columns:
+        norm_col = _norm(col)
+        if len(norm_item) >= 2 and (norm_item in norm_col or norm_col in norm_item):
+            return col
+    # Jaccard similarity fallback
+    best, best_score = None, 0.0
+    item_chars = set(norm_item)
+    for col in score_columns:
+        col_chars = set(_norm(col))
+        if not item_chars or not col_chars:
+            continue
+        j = len(item_chars & col_chars) / len(item_chars | col_chars)
+        if j > 0.5 and j > best_score:
+            best_score = j
+            best = col
+    return best
+
+
+def _compute_objective_achievement(headers, rows, objective_mapping, score_columns,
+                                     item_totals=None):
+    """Compute per-student per-objective achievement.
+
+    Raw scores may be on different scales across columns (e.g. 课后作业 is
+    out of 20 when item_total=20%, while 期末考试 is out of 100).  The
+    item_totals dict (from the 合计 row) tells us each column's scale so we
+    can normalize every score to a common basis:
+
+        contribution = score × weight_pct / item_total
+        rate = sum(contributions) / sum(weight_pct) × 100
+
+    Returns:
+        per_student: [{name, objectives: {obj_name: rate_decimal}}, ...]
+        objective_items: {obj_name: [(item, target_score, weight_pct), ...]}
+        objective_names: ordered list
+        item_to_col: {item_name: column_name}
+        col_avgs: {column_name: average_raw_score}
+        obj_rates: {obj_name: overall_achievement_rate}
+    """
+    import re
+
+    # Group mapping by objective
+    obj_items = {}
+    obj_order = []
+    for m in objective_mapping:
+        obj = m['objective']
+        if obj not in obj_items:
+            obj_items[obj] = []
+            obj_order.append(obj)
+        obj_items[obj].append((m['item'], m['target_score'], m['weight_pct']))
+
+    # Match each mapping item to a score column
+    item_to_col = {}
+    for m in objective_mapping:
+        item_name = m['item']
+        col = _match_item_to_column(item_name, score_columns)
+        if col:
+            item_to_col[item_name] = col
+
+    # Find name column
+    name_col = None
+    for h in headers:
+        if '姓名' in str(h).replace(' ', '').strip():
+            name_col = h
+            break
+
+    # Detect each column's score scale.
+    # Some columns are on a 0–100 scale (e.g. 期末考试), others are on their
+    # item_total scale (e.g. 课后作业 max=20 when item_total=20%).
+    # Normalize everything to 0–100 so the unified formula works:
+    #   avg_score = col_avg_100 × weight_pct / 100
+    tot = item_totals if item_totals else {}
+    col_divisor = {}  # {col_name: divisor} — score / divisor gives percentage
+    for col in score_columns:
+        col_scores = [_parse_score(row.get(col)) for row in rows]
+        col_scores = [s for s in col_scores if s is not None]
+        if not col_scores:
+            col_divisor[col] = 100
+            continue
+        col_max = max(col_scores)
+        # Find item_total for this column
+        item_total = 100
+        for item_name, c in item_to_col.items():
+            if c == col:
+                item_total = tot.get(item_name, 100)
+                break
+        if col_max > item_total + 1:
+            # Scores on 0–100 (or larger) scale → divisor is 100
+            col_divisor[col] = 100
+        else:
+            # Scores on item_total scale → normalize via item_total
+            col_divisor[col] = item_total if item_total > 0 else 100
+
+    # Compute per-student achievement with scale-normalized scores.
+    per_student = []
+    for row in rows:
+        name = str(row.get(name_col, '')).strip() if name_col else ''
+        student_obj_achievements = {}
+        for obj_name, items in obj_items.items():
+            total_contrib = 0.0
+            total_weight = 0.0
+            for item, target_score, weight_pct in items:
+                col = item_to_col.get(item)
+                if col is None or target_score is None:
+                    continue
+                score_val = _parse_score(row.get(col))
+                if score_val is None:
+                    continue
+                divisor = col_divisor.get(col, 100)
+                if divisor <= 0:
+                    continue
+                total_contrib += score_val * target_score / divisor
+                total_weight += target_score
+
+            if total_weight > 0:
+                rate = round(total_contrib / total_weight * 100, 2)
+            else:
+                rate = 0.0
+            student_obj_achievements[obj_name] = rate
+
+        per_student.append({'name': name, 'objectives': student_obj_achievements})
+
+    # Compute column averages, normalized to 0–100 scale.
+    col_avgs = {}
+    for col in score_columns:
+        scores = [_parse_score(row.get(col)) for row in rows]
+        scores = [s for s in scores if s is not None]
+        if scores:
+            raw_avg = sum(scores) / len(scores)
+            divisor = col_divisor.get(col, 100)
+            if divisor > 0 and divisor != 100:
+                col_avgs[col] = round(raw_avg * 100 / divisor, 2)
+            else:
+                col_avgs[col] = round(raw_avg, 2)
+
+    # Compute overall objective achievement rates
+    obj_rates = {}
+    for obj_name in obj_order:
+        values = [s['objectives'].get(obj_name, 0) for s in per_student]
+        if values:
+            obj_rates[obj_name] = round(sum(values) / len(values), 2)
+        else:
+            obj_rates[obj_name] = 0.0
+
+    return {
+        'per_student': per_student,
+        'objective_items': obj_items,
+        'objective_names': obj_order,
+        'item_to_col': item_to_col,
+        'col_avgs': col_avgs,
+        'obj_rates': obj_rates,
+    }
+
+
+def _convert_wide_to_long_mapping(wide_data):
+    """Convert wide-format mapping to long-format expected by achievement computation.
+
+    Wide:  [{'objective': str, 'items': [{'item': str, 'weight_pct': str}, ...]}, ...]
+           or [{'objective': str, 'items': [str, ...]}, ...]  (legacy format)
+    Long:  [{'objective': str, 'item': str, 'target_score': float|None, 'weight_pct': float}, ...]
+    """
+    result = []
+    for entry in wide_data:
+        obj = entry['objective']
+        for item_entry in entry.get('items', []):
+            if isinstance(item_entry, str):
+                # Legacy format: items are plain strings, no weight info
+                result.append({
+                    'objective': obj,
+                    'item': item_entry,
+                    'target_score': None,
+                    'weight_pct': None,
+                })
+            else:
+                wp_str = item_entry.get('weight_pct', '')
+                wp_val = _parse_numeric(wp_str) if wp_str else None
+                # weight_pct from parser is a percentage (e.g. 4 = 4%).
+                # target_score should be the same numeric value for the formula:
+                #   contribution = score × target_score / divisor
+                #   rate = sum(contributions) / sum(target_scores) × 100
+                result.append({
+                    'objective': obj,
+                    'item': item_entry['item'],
+                    'target_score': wp_val,
+                    'weight_pct': (wp_val / 100) if wp_val is not None else None,
+                })
+    return result
+
+
+def _build_section_5_1_from_items(objective_items, objective_names,
+                                    item_to_col=None, col_avgs=None,
+                                    item_totals=None, semester_name=''):
+    """Build section 5.1 data from the already-computed objective→items mapping.
+
+    Computes:
+      target_score = weight_pct number (e.g. '4%' → 4.0)
+      avg_score = col_avg_100 × target_score / 100
+      achievement_rate = sum(avg_scores) / sum(target_scores) × 100%
+
+    col_avgs are pre-normalized to 0-100 scale by _compute_objective_achievement
+    so the formula is unified regardless of each column's original scale.
+
+    Args:
+        objective_items: {obj_name: [(item, target_score, weight_pct), ...]}
+        objective_names: ordered list of objective names
+        item_to_col: {item_name: grade_column_name}  (optional)
+        col_avgs: {grade_column_name: average_score_on_0_100_scale}  (optional)
+        item_totals: (unused — scale handled upstream, kept for compatibility)
+        semester_name: string
+    """
+    if not objective_names:
+        return None
+
+    title = f'{semester_name} 课程目标达成情况' if semester_name else '课程目标达成情况'
+
+    objectives = []
+    for obj_name in objective_names:
+        items = objective_items.get(obj_name, [])
+        built_items = []
+        total_weight = 0.0
+        for tup in items:
+            item_name = tup[0]
+            weight_pct = tup[2] if tup[2] is not None else '0%'
+            ts = _parse_weight_pct_to_target(weight_pct)
+            total_weight += ts
+
+            # avg_score = col_avg × weight_pct / 100
+            # col_avg is already normalized to 0-100 scale by _compute_objective_achievement
+            avg_score = 0
+            if item_to_col and col_avgs:
+                col_name = item_to_col.get(item_name)
+                if col_name:
+                    col_avg = col_avgs.get(col_name, 0)
+                    if col_avg > 0:
+                        avg_score = round(col_avg * ts / 100, 2)
+
+            built_items.append({
+                'item': item_name,
+                'target_score': ts,
+                'avg_score': avg_score,
+                'weight_pct': weight_pct,
+            })
+
+        # achievement_rate = sum(avg_scores) / sum(target_scores) × 100%
+        if item_to_col and col_avgs and total_weight > 0:
+            sum_avg = sum(it['avg_score'] for it in built_items)
+            rate = round(sum_avg / total_weight * 100, 2)
+            achievement_rate = f'{rate}%'
+        else:
+            # Fallback: sum of weight percentages
+            achievement_rate = f'{int(total_weight)}%'
+
+        objectives.append({
+            'name': obj_name,
+            'items': built_items,
+            'achievement_rate': achievement_rate,
+        })
+
+    return {
+        'semester_name': semester_name,
+        'title': title,
+        'objectives': objectives,
+    }
+
+
+def _infer_objective_mapping(objectives_text, score_columns, column_weights,
+                              evaluation_standards, headers, rows):
+    """Use AI to infer objective-to-evaluation-item mapping when syllabus lacks one.
+
+    NOTE: Zhipu AI call is disabled during early debugging.
+    Remove the early-return below to re-enable AI inference.
+    """
+    # TODO: re-enable Zhipu AI when ready
+    return None
+
+    # from course_eval.utils.zhipu import call_zhipu
+    #
+    # if not objectives_text or objectives_text == '未填写':
+    #     return None
+    #
+    # ... (rest of function)
+
+    obj_list = _parse_objectives_list(objectives_text)
+    if not obj_list:
+        return None
+
+    col_info_lines = []
+    for col in score_columns:
+        w = column_weights.get(col) if column_weights else None
+        w_str = f'（权重{w:.0f}%）' if w else ''
+        col_info_lines.append(f'- {col}{w_str}')
+    col_info = '\n'.join(col_info_lines)
+
+    objectives_str = '\n'.join(f'{i+1}. {obj}' for i, obj in enumerate(obj_list))
+
+    prompt = f"""你是一位课程评估专家。请根据课程目标和评价项目，推断每个课程目标对应的评价项目及其目标分值和权重。
+
+【课程目标】
+{objectives_str}
+
+【成绩列（评价项目）】
+{col_info}
+
+请为每个课程目标列出其对应的评价项目，以JSON数组格式输出。每个元素包含：
+- objective: 使用上面列出的完整课程目标文本
+- item: 使用上面列出的成绩列名称
+- target_score: 目标分值（如果无法确定可以设为null）
+- weight_pct: 权重百分比数值（如果无法确定可以设为null）
+
+要求：
+1. 每个目标至少对应一个评价项目（一个评价项目可以对应多个目标）
+2. 只输出JSON数组，不要包含其他说明文字"""
+
+    try:
+        system_prompt = '你是一位课程评估专家。请严格按照要求输出JSON格式，不要包含任何其他文字。'
+        result = call_zhipu(system_prompt, prompt)
+        if result:
+            import re
+            match = re.search(r'\[[\s\S]*\]', result)
+            if match:
+                import json
+                mapping = json.loads(match.group())
+                if mapping and isinstance(mapping, list) and len(mapping) > 0:
+                    return mapping
+    except Exception:
+        pass
+
+    return None
+
+
+def _build_achievement_table(objective_items, objective_names, obj_rates,
+                               item_to_col, col_avgs):
+    """Build Table 6: 课程目标达成情况计算表.
+
+    Columns: 课程目标 | 评价内容 | 目标分值 | 平均得分 | 权重系数 | 课程目标达成情况
+    The final column repeats the overall objective achievement rate for every row.
+    """
+    result = []
+    for obj_name in objective_names:
+        items = objective_items.get(obj_name, [])
+        overall_rate = obj_rates.get(obj_name, 0.0)
+        for item, target_score, weight_pct in items:
+            col = item_to_col.get(item)
+            avg_score = col_avgs.get(col) if col else None
+            w_pct = f'{weight_pct}%' if weight_pct else ''
+            result.append({
+                'objective': obj_name,
+                'item': item,
+                'target_score': target_score,
+                'avg_score': avg_score,
+                'weight_pct': w_pct,
+                'achievement_rate': f'{overall_rate}%',
+            })
+    return result
+
+
+def _build_distribution_table(per_student, objective_names):
+    """Build Table 7: 各课程目标达成度分布表.
+
+    Returns:
+        objectives: ordered objective names
+        avg: average achievement rate per objective
+        rows: [{label, counts: [...], pcts: [...]}]
+    """
+    ranges = [
+        ('90%以上', 90, 101),
+        ('80%～89%', 80, 90),
+        ('70%～79%', 70, 80),
+        ('60%～69%', 60, 70),
+        ('60%以下', 0, 60),
+    ]
+
+    obj_avgs = []
+    obj_dists = []
+
+    for obj_name in objective_names:
+        values = [s['objectives'].get(obj_name, 0) for s in per_student
+                  if obj_name in s['objectives']]
+        if values:
+            obj_avgs.append(round(sum(values) / len(values), 2))
+        else:
+            obj_avgs.append(0.0)
+
+        dist = {}
+        for label, lo, hi in ranges:
+            count = sum(1 for v in values if lo <= v < hi)
+            pct = round(count / len(values) * 100, 2) if values else 0
+            dist[label] = {'count': count, 'pct': pct}
+        obj_dists.append(dist)
+
+    dist_rows = []
+    for label, lo, hi in ranges:
+        dist_rows.append({
+            'label': label,
+            'counts': [obj_dists[oi].get(label, {}).get('count', 0) for oi in range(len(objective_names))],
+            'pcts': [obj_dists[oi].get(label, {}).get('pct', 0) for oi in range(len(objective_names))],
+        })
+
+    return {
+        'objectives': objective_names,
+        'avg': obj_avgs,
+        'rows': dist_rows,
+    }
+
+
+def _build_low_achievement_table(per_student, objective_names, total_scores=None):
+    """Build Table 8: 未达成课程目标学生汇总表.
+
+    Only includes students whose 总评成绩 (total score) is below 60.
+    If total_scores is not provided, falls back to the old behavior of
+    including any student with an objective rate below 60%.
+
+    Values shown as decimals (e.g., 0.46) matching the template format.
+    """
+    low_students = []
+    for s in per_student:
+        name = s['name']
+        if total_scores is not None:
+            score = total_scores.get(name)
+            if score is None or score >= 60:
+                continue
+
+        achievements = {}
+        for obj_name in objective_names:
+            rate = s['objectives'].get(obj_name, 0)
+            decimal_val = round(rate / 100, 2)
+            achievements[obj_name] = decimal_val
+        low_students.append({'name': name, 'achievements': achievements})
+    return low_students
+
+
+def _build_per_objective_analysis_prompt(obj_name, obj_rate, course_name, objectives_text):
+    """Build prompt for single-objective AI analysis."""
+    return f"""你是一位大学课程评估专家。请对以下课程目标的达成情况进行简要分析。
+
+课程名称：{course_name}
+
+{obj_name}：达成度为{obj_rate}%
+
+课程目标全文：
+{objectives_text}
+
+请写一段约100-150字的分析，说明该目标的达成水平如何、可能的原因以及改进方向。
+直接输出分析内容，不需要"课程目标X的达成情况分析"之类的标题。"""
+
+
+def _generate_per_objective_analysis(obj_name, obj_rate, course_name, objectives_text):
+    """Generate AI analysis for a single objective.
+
+    NOTE: Zhipu AI call is disabled during early debugging.
+    Remove the early-return below to re-enable AI generation.
+    """
+    # TODO: re-enable Zhipu AI when ready
+    # try:
+    #     from course_eval.utils.zhipu import call_zhipu
+    #     system_prompt = '你是一位经验丰富的大学课程评估专家。'
+    #     user_prompt = _build_per_objective_analysis_prompt(
+    #         obj_name, obj_rate, course_name, objectives_text)
+    #     result = call_zhipu(system_prompt, user_prompt)
+    #     if result:
+    #         return result
+    # except Exception:
+    #     pass
+
+    # Fallback
+    if obj_rate >= 90:
+        level = '优秀'
+    elif obj_rate >= 80:
+        level = '良好'
+    elif obj_rate >= 70:
+        level = '中等'
+    elif obj_rate >= 60:
+        level = '及格'
+    else:
+        level = '待改进'
+    return f'{obj_name}的达成度为{obj_rate}%，达成水平为"{level}"。基于学生成绩数据分析，该目标的达成情况总体较好，建议持续关注并优化相关教学环节。'
+
+
+def _build_radar_chart_data(objective_names, obj_rates):
+    """Build radar chart data for overall objective achievement visualization."""
+    return {
+        'labels': objective_names,
+        'values': [obj_rates.get(obj, 0) for obj in objective_names],
+    }
+
+
+def _get_fallback_module5():
+    """Fallback when data-driven generation fails."""
+    return {
+        'report_title': '',
+        'objectives': [],
+        'achievement_table': [],
+        'distribution_table': None,
+        'per_objective_analysis': [],
+        'low_students': [],
+        'radar_data': {'labels': [], 'values': []},
+        'student_achievements': [],
+        'overall_avg_achievement': 0,
+        'section_5_1': None,
+        'generated': False,
+    }
+
+
+def generate_module_5(course_name='', objectives='', evaluation_standards=None,
+                      grades_file=None, user_id=None, semester_name=''):
+    """Generate Module 5: Course Objective Achievement Degree.
+
+    Matches the template structure:
+      (5.1) 课程目标达成情况 → Summary overview table
+      (1) 统计分析 → Table 6 (achievement calc) + Table 7 (distribution)
+      (2) 图形分析 → Charts (radar + per-objective distribution)
+      (3) 教学班整体课程目标达成情况分析 → Per-objective AI analysis
+      (4) 学生个体课程目标达成情况分析 → Table 8 (low students)
+
+    Formula: achievement = sum(raw_scores) / sum(target_scores) * 100
+    """
+    import re
+
+    if not grades_file or not user_id:
+        result = _get_fallback_module5()
+        result['section_5_1'] = _generate_section_5_1(evaluation_standards, semester_name)
+        return result
+
+    try:
+        grades_data = get_effective_data(grades_file, user_id)
+    except Exception:
+        result = _get_fallback_module5()
+        result['section_5_1'] = _generate_section_5_1(evaluation_standards, semester_name)
+        return result
+
+    headers = grades_data['headers']
+    rows = grades_data['rows']
+
+    # Identify score columns
+    name_col_index = _find_name_column_index(headers)
+    score_columns = []
+    for i, col in enumerate(headers):
+        col_values = [row.get(col) for row in rows if col in row]
+        if _is_score_column(col, col_values, i, name_col_index):
+            score_columns.append(col)
+
+    if not score_columns:
+        result = _get_fallback_module5()
+        result['section_5_1'] = _generate_section_5_1(evaluation_standards, semester_name)
+        return result
+
+    # Extract weights and objective mapping from evaluation standards.
+    # Try wide-format first — long-format parser can falsely match wide tables
+    # because spanning headers like "评价依据及成绩比例(%)" contain "评价".
+    item_weights_map = _extract_score_weights(evaluation_standards) if evaluation_standards else None
+    objective_mapping = None
+
+    wide_data = _parse_wide_eval_table(evaluation_standards) if evaluation_standards else None
+    if wide_data:
+        objective_mapping = _convert_wide_to_long_mapping(wide_data)
+    else:
+        objective_mapping = _parse_objective_item_mapping(evaluation_standards) if evaluation_standards else None
+
+    if not objective_mapping:
+        column_weights = _match_score_weights(score_columns, item_weights_map) if item_weights_map else {}
+        objective_mapping = _infer_objective_mapping(
+            objectives, score_columns, column_weights,
+            evaluation_standards, headers, rows)
+
+    if not objective_mapping:
+        result = _get_fallback_module5()
+        result['section_5_1'] = _generate_section_5_1(evaluation_standards, semester_name)
+        return result
+
+    # Parse 合计 row from syllabus for per-column scale normalization
+    item_totals = _parse_eval_item_totals(evaluation_standards)
+
+    # Compute per-student achievement
+    ach_data = _compute_objective_achievement(
+        headers, rows, objective_mapping, score_columns, item_totals)
+
+    per_student = ach_data['per_student']
+    objective_items = ach_data['objective_items']
+    objective_names = ach_data['objective_names']
+    item_to_col = ach_data['item_to_col']
+    col_avgs = ach_data['col_avgs']
+    obj_rates = ach_data['obj_rates']
+
+    if not objective_names:
+        result = _get_fallback_module5()
+        result['section_5_1'] = _generate_section_5_1(evaluation_standards, semester_name)
+        return result
+
+    # Build section 5.1 from the computed objective_items
+    section_5_1 = _build_section_5_1_from_items(objective_items, objective_names,
+                                                    item_to_col, col_avgs,
+                                                    item_totals, semester_name)
+
+    # Build Table 6: 课程目标达成情况计算表
+    achievement_table = _build_achievement_table(
+        objective_items, objective_names, obj_rates, item_to_col, col_avgs)
+
+    # Build Table 7: 各课程目标达成度分布表
+    distribution_table = _build_distribution_table(per_student, objective_names)
+
+    # Extract total scores (总评成绩) for filtering Table 8
+    total_score_col = None
+    for h in headers:
+        norm = str(h).replace(' ', '').strip()
+        if norm in ('总评', '总评成绩', '总分', '总成绩'):
+            total_score_col = h
+            break
+    if not total_score_col:
+        # Fuzzy match: column name contains any of these keywords
+        for h in headers:
+            norm = str(h).replace(' ', '').strip()
+            if '总评' in norm or '总分' in norm or '总成绩' in norm:
+                total_score_col = h
+                break
+
+    total_scores = {}
+    if total_score_col:
+        name_col = None
+        for h in headers:
+            if '姓名' in str(h).replace(' ', '').strip():
+                name_col = h
+                break
+        for row in rows:
+            name = str(row.get(name_col, '')).strip() if name_col else ''
+            if name:
+                score = _parse_score(row.get(total_score_col))
+                if score is not None:
+                    total_scores[name] = score
+
+    # Build Table 8: 未达成课程目标学生汇总表
+    low_students = _build_low_achievement_table(
+        per_student, objective_names, total_scores if total_scores else None)
+
+    # Per-objective AI analysis for section (3)
+    per_objective_analysis = []
+    for obj_name in objective_names:
+        rate = obj_rates.get(obj_name, 0)
+        analysis = _generate_per_objective_analysis(obj_name, rate, course_name, objectives)
+        per_objective_analysis.append({
+            'objective': obj_name,
+            'rate': rate,
+            'analysis': analysis,
+        })
+
+    # Radar chart data
+    radar_data = _build_radar_chart_data(objective_names, obj_rates)
+
+    # Per-student average achievement for scatter chart
+    student_achievements = []
+    for s in per_student:
+        vals = list(s['objectives'].values())
+        avg_val = round(sum(vals) / len(vals), 2) if vals else 0.0
+        student_achievements.append({
+            'name': s['name'],
+            'avg_achievement': avg_val,
+        })
+    overall_avg = round(
+        sum(s['avg_achievement'] for s in student_achievements) / len(student_achievements), 2
+    ) if student_achievements else 0.0
+
+    return {
+        'report_title': f'{course_name} 课程目标达成情况',
+        'objectives': objective_names,
+        'achievement_table': achievement_table,
+        'distribution_table': distribution_table,
+        'per_objective_analysis': per_objective_analysis,
+        'low_students': low_students,
+        'radar_data': radar_data,
+        'student_achievements': student_achievements,
+        'overall_avg_achievement': overall_avg,
+        'section_5_1': section_5_1,
+        'generated': True,
+    }
+
+
+def generate_module_6(context=None):
+    """Generate Module 6: Continuous Improvement Plan.
 
     Args:
         context: Optional dict with keys course_name, objectives, grade_summary.
@@ -962,15 +2186,15 @@ def generate_module_5(context=None):
             from course_eval.utils.zhipu import call_zhipu
 
             system_prompt = '你是一位经验丰富的大学教学督导专家，擅长撰写课程持续改进方案。请严格按照要求的格式和结构输出内容。'
-            user_prompt = _build_module5_prompt(context)
+            user_prompt = _build_module6_prompt(context)
             result = call_zhipu(system_prompt, user_prompt)
 
             if result:
-                return _parse_module5_response(result)
+                return _parse_module6_response(result)
         except Exception:
             pass
 
-    return _get_fallback_module5()
+    return _get_fallback_module6()
 
 
 # ── Full report orchestrator ────────────────────────────────────────────────
@@ -1001,15 +2225,18 @@ def generate_report(user_id, course_id, class_id, semester_name):
     module_2 = generate_module_2(syllabus_fields)
     module_4 = generate_module_4(grades_file, user_id, evaluation_standards)
 
-    # Build context for Module 5 AI generation
-    module5_context = _build_module5_context(course.name, module_2, module_4)
-
     report_data = {
         'module_1_course_info': module_1,
         'module_2_objectives': module_2,
         'module_3_evaluation_standards': generate_module_3(syllabus_fields),
         'module_4_evaluation_results': module_4,
-        'module_5_improvement_plan': generate_module_5(module5_context),
+        'module_5_objective_achievement': generate_module_5(
+            course.name, module_2, evaluation_standards, grades_file, user_id,
+            semester_name=semester.name,
+        ),
+        'module_6_improvement_plan': generate_module_6(
+            _build_module6_context(course.name, module_2, module_4)
+        ),
     }
 
     report_name = f'{course.name} {class_group.name} {semester.name} 成绩质量检测报告'

@@ -10,6 +10,7 @@ import { useExcelStore } from '@/store/excel'
 import {
   generateReport, getReportPreview, getReports,
   generateModule, updateModule, exportModuleDocx, mergeReport,
+  generateAchievementExcel, downloadAchievementExcel,
 } from '@/api/report'
 import type { ReportRecord, ReportData } from '@/api/report'
 import Module1Editor from '@/components/report/Module1Editor.vue'
@@ -17,6 +18,7 @@ import Module2Editor from '@/components/report/Module2Editor.vue'
 import Module3Editor from '@/components/report/Module3Editor.vue'
 import Module4Editor from '@/components/report/Module4Editor.vue'
 import Module5Editor from '@/components/report/Module5Editor.vue'
+import Module6Editor from '@/components/report/Module6Editor.vue'
 
 const store = useExcelStore()
 
@@ -29,7 +31,7 @@ const reportId = ref<number | null>(null)
 const reportName = ref('')
 const reportData = ref<ReportData | null>(null)
 const moduleStatuses = ref<Record<number, string>>({
-  1: 'pending', 2: 'pending', 3: 'pending', 4: 'pending', 5: 'pending',
+  1: 'pending', 2: 'pending', 3: 'pending', 4: 'pending', 5: 'pending', 6: 'pending',
 })
 
 // ── UI state ────────────────────────────────────────────────────────────────
@@ -42,8 +44,9 @@ const steps = [
   { num: 2, title: '课程目标', icon: '2' },
   { num: 3, title: '课程评价标准', icon: '3' },
   { num: 4, title: '课程评价结果', icon: '4' },
-  { num: 5, title: '持续改进方案', icon: '5' },
-  { num: 6, title: '合并导出', icon: '✓' },
+  { num: 5, title: '课程目标达成度', icon: '5' },
+  { num: 6, title: '持续改进方案', icon: '6' },
+  { num: 7, title: '合并导出', icon: '✓' },
 ]
 
 const fileStatusText: Record<string, string> = {
@@ -56,7 +59,7 @@ const fileStatusText: Record<string, string> = {
 watch(selection, async (s) => {
   reportId.value = null
   reportData.value = null
-  moduleStatuses.value = { 1: 'pending', 2: 'pending', 3: 'pending', 4: 'pending', 5: 'pending' }
+  moduleStatuses.value = { 1: 'pending', 2: 'pending', 3: 'pending', 4: 'pending', 5: 'pending', 6: 'pending' }
 
   if (s.courseId && s.classId && s.semesterName) {
     await store.fetchCourseFiles(s.courseId, s.classId, s.semesterName)
@@ -68,7 +71,7 @@ watch(selection, async (s) => {
         reportId.value = r.id
         reportName.value = r.report_name
         const m = r as Record<string, unknown>
-        for (let i = 1; i <= 5; i++) {
+        for (let i = 1; i <= 6; i++) {
           moduleStatuses.value[i] = (m[`module_${i}_status`] as string) || 'pending'
         }
         // Load full report data so module editors display immediately
@@ -91,7 +94,7 @@ watch(selection, async (s) => {
 }, { deep: true })
 
 // ── Report data helpers ─────────────────────────────────────────────────────
-const moduleKeys = ['', 'module_1_course_info', 'module_2_objectives', 'module_3_evaluation_standards', 'module_4_evaluation_results', 'module_5_improvement_plan'] as const
+const moduleKeys = ['', 'module_1_course_info', 'module_2_objectives', 'module_3_evaluation_standards', 'module_4_evaluation_results', 'module_5_objective_achievement', 'module_6_improvement_plan'] as const
 
 function getModuleData(num: number) {
   if (!reportData.value) return null
@@ -104,7 +107,7 @@ function setModuleData(num: number, data: unknown) {
 }
 
 const allConfirmed = computed(() => {
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 1; i <= 6; i++) {
     if (moduleStatuses.value[i] !== 'confirmed') return false
   }
   return true
@@ -112,7 +115,7 @@ const allConfirmed = computed(() => {
 
 const confirmedCount = computed(() => {
   let count = 0
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 1; i <= 6; i++) {
     if (moduleStatuses.value[i] === 'confirmed') count++
   }
   return count
@@ -142,13 +145,13 @@ async function ensureReport(silent = false) {
     reportId.value = generated.id
     reportName.value = generated.report_name
     const m = generated as Record<string, unknown>
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
       moduleStatuses.value[i] = (m[`module_${i}_status`] as string) || 'draft'
     }
     // Load the full preview
     const preview = await getReportPreview(generated.id) as unknown as { report_data: ReportData }
     reportData.value = preview.report_data
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
       if (moduleStatuses.value[i] === 'pending') {
         moduleStatuses.value[i] = 'draft'
       }
@@ -169,7 +172,7 @@ async function fetchReportData(): Promise<boolean> {
     const preview = await getReportPreview(reportId.value) as unknown as { report_data: ReportData }
     reportData.value = preview.report_data
     const p = preview as unknown as Record<string, unknown>
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
       moduleStatuses.value[i] = (p[`module_${i}_status`] as string) || 'pending'
     }
     return true
@@ -267,10 +270,44 @@ async function handleExportModule(num: number) {
   }
 }
 
+// ── Module 5 Excel ──────────────────────────────────────────────────────────
+
+async function handleGenerateExcel() {
+  if (!reportId.value) {
+    const ok = await ensureReport()
+    if (!ok) return
+  }
+  actionLoading.value = true
+  try {
+    const result = await generateAchievementExcel(reportId.value!) as { success: boolean; filename: string }
+    if (result.success) {
+      ElMessage.success('课程达成度计算Excel已生成')
+      // Refresh report data to get updated excel_generated flag
+      await fetchReportData()
+    }
+  } catch {
+    ElMessage.error('Excel生成失败')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function handleDownloadExcel() {
+  if (!reportId.value) return
+  const moduleData = getModuleData(5) as Record<string, unknown> | null
+  const filename = (moduleData as any)?.excel_filename || '课程达成度计算.xlsx'
+  try {
+    await downloadAchievementExcel(reportId.value, filename as string)
+    ElMessage.success('Excel下载成功')
+  } catch {
+    ElMessage.error('Excel下载失败')
+  }
+}
+
 function handleStepClick(num: number) {
-  if (num === 6 && !allConfirmed.value) {
+  if (num === 7 && !allConfirmed.value) {
     const unconfirmed: number[] = []
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
       if (moduleStatuses.value[i] !== 'confirmed') unconfirmed.push(i)
     }
     const names = unconfirmed.map(n => `"${steps[n - 1].title}"`).join('、')
@@ -279,7 +316,7 @@ function handleStepClick(num: number) {
     return
   }
   activeStep.value = num
-  if (num <= 5 && !reportData.value && reportId.value) {
+  if (num <= 6 && !reportData.value && reportId.value) {
     loadReport()
   }
 }
@@ -348,7 +385,7 @@ function onModuleDataUpdate(num: number, data: unknown) {
             <el-step
               v-for="step in steps"
               :key="step.num"
-              :status="step.num === 6 ? (allConfirmed ? 'finish' : 'wait') : stepStatus(step.num)"
+              :status="step.num === 7 ? (allConfirmed ? 'finish' : 'wait') : stepStatus(step.num)"
               @click="handleStepClick(step.num)"
               style="cursor: pointer"
             >
@@ -361,7 +398,7 @@ function onModuleDataUpdate(num: number, data: unknown) {
                 </span>
               </template>
               <template #description>
-                <span v-if="step.num <= 5" style="font-size: 12px">
+                <span v-if="step.num <= 6" style="font-size: 12px">
                   <el-tag
                     v-if="moduleStatuses[step.num] === 'confirmed'"
                     type="success"
@@ -388,7 +425,7 @@ function onModuleDataUpdate(num: number, data: unknown) {
                     v-else
                     type="info"
                     size="small"
-                  >{{ confirmedCount }}/5 已确认</el-tag>
+                  >{{ confirmedCount }}/6 已确认</el-tag>
                 </span>
               </template>
             </el-step>
@@ -466,10 +503,10 @@ function onModuleDataUpdate(num: number, data: unknown) {
           />
         </el-card>
 
-        <!-- Step 5: Module 5 Editor -->
+        <!-- Step 5: Module 5 Editor (课程目标达成度) -->
         <el-card v-if="activeStep === 5">
           <template #header>
-            <span style="font-weight: 700">五、课程持续改进方案及措施</span>
+            <span style="font-weight: 700">五、课程目标达成度</span>
           </template>
           <Module5Editor
             :model-value="getModuleData(5) as any"
@@ -480,25 +517,44 @@ function onModuleDataUpdate(num: number, data: unknown) {
             @save="handleSave(5)"
             @confirm="handleConfirm(5)"
             @export="handleExportModule(5)"
+            @generate-excel="handleGenerateExcel"
+            @download-excel="handleDownloadExcel"
           />
         </el-card>
 
-        <!-- Step 6: Merge Export -->
+        <!-- Step 6: Module 6 Editor (持续改进方案) -->
         <el-card v-if="activeStep === 6">
+          <template #header>
+            <span style="font-weight: 700">六、课程持续改进方案及措施</span>
+          </template>
+          <Module6Editor
+            :model-value="getModuleData(6) as any"
+            :status="moduleStatuses[6]"
+            :loading="actionLoading"
+            @update:model-value="(d: any) => onModuleDataUpdate(6, d)"
+            @regenerate="handleRegenerate(6)"
+            @save="handleSave(6)"
+            @confirm="handleConfirm(6)"
+            @export="handleExportModule(6)"
+          />
+        </el-card>
+
+        <!-- Step 7: Merge Export -->
+        <el-card v-if="activeStep === 7">
           <template #header>
             <span style="font-weight: 700">合并导出完整报告</span>
           </template>
 
           <el-alert
             v-if="!allConfirmed"
-            :title="`还有 ${5 - confirmedCount} 个模块未确认`"
+            :title="`还有 ${6 - confirmedCount} 个模块未确认`"
             type="warning"
             show-icon
             :closable="false"
             style="margin-bottom: 20px"
           >
             <template #default>
-              <div v-for="i in 5" :key="i">
+              <div v-for="i in 6" :key="i">
                 <el-tag v-if="moduleStatuses[i] !== 'confirmed'" type="danger" size="small" style="margin-right: 8px">
                   模块{{ i }}: {{ moduleStatuses[i] === 'draft' ? '草稿' : '待生成' }}
                 </el-tag>
@@ -525,7 +581,7 @@ function onModuleDataUpdate(num: number, data: unknown) {
           </el-result>
 
           <div v-if="!allConfirmed" style="text-align: center; padding: 40px">
-            <el-empty description="请先确认所有5个模块后再进行合并导出" />
+            <el-empty description="请先确认所有6个模块后再进行合并导出" />
           </div>
         </el-card>
       </div>

@@ -318,7 +318,6 @@ const fileStatusText: Record<string, string> = {
               v-else-if="block.type === 'table'"
               :data="block.grid"
               border size="small"
-              style="width: 100%"
             >
               <el-table-column
                 v-for="(_, colIdx) in block.num_cols"

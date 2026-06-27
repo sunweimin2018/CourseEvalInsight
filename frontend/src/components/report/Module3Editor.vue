@@ -149,7 +149,7 @@ function removeBlock(idx: number) {
           />
         </template>
         <template v-else-if="block.type === 'table'">
-          <table style="border-collapse: collapse; width: 100%; margin-bottom: 8px">
+          <table style="border-collapse: collapse; margin-bottom: 8px">
             <tbody>
               <tr v-for="(row, ri) in block.grid" :key="ri">
                 <template v-for="(cell, ci) in row" :key="ci">

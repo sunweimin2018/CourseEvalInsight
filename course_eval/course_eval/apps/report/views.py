@@ -6,14 +6,15 @@ from .models import ReportRecord
 from .serializers import ReportRecordSerializer, ReportGenerateSerializer, ModuleUpdateSerializer
 from .report_engine import (
     generate_report, generate_module_1, generate_module_2, generate_module_3,
-    generate_module_4, generate_module_5, _parse_syllabus, _analyze_student_info,
+    generate_module_4, generate_module_5, generate_module_6, _parse_syllabus, _analyze_student_info,
 )
 from .report_engine import _find_file
 from .module_docx import (
     export_module_1_docx, export_module_2_docx, export_module_3_docx,
-    export_module_4_docx, export_module_5_docx,
-    _render_module_4_to_docx, _render_module_5_to_docx,
+    export_module_4_docx, export_module_5_docx, export_module_6_docx,
+    _render_module_4_to_docx, _render_module_5_to_docx, _render_module_6_to_docx,
 )
+from .excel_engine import generate_achievement_excel
 from .pdf_engine import generate_pdf
 
 MODULE_MAP = {
@@ -21,7 +22,8 @@ MODULE_MAP = {
     2: ('module_2_objectives', 'module_2_status'),
     3: ('module_3_evaluation_standards', 'module_3_status'),
     4: ('module_4_evaluation_results', 'module_4_status'),
-    5: ('module_5_improvement_plan', 'module_5_status'),
+    5: ('module_5_objective_achievement', 'module_5_status'),
+    6: ('module_6_improvement_plan', 'module_6_status'),
 }
 
 EXPORT_FUNCTIONS = {
@@ -30,6 +32,7 @@ EXPORT_FUNCTIONS = {
     3: export_module_3_docx,
     4: export_module_4_docx,
     5: export_module_5_docx,
+    6: export_module_6_docx,
 }
 
 
@@ -71,12 +74,23 @@ def _regenerate_module(report, module_num):
         return generate_module_4(report.grades_file, user_id, evaluation_standards)
 
     elif module_num == 5:
-        from .report_engine import _build_module5_context
+        from .report_engine import generate_module_5
+        syllabus_fields = _parse_syllabus(report.syllabus_file)
+        evaluation_standards = syllabus_fields.get('evaluation_standards')
+        objectives = report.report_data.get('module_2_objectives', '')
+        return generate_module_5(
+            course.name, objectives, evaluation_standards,
+            report.grades_file, user_id,
+            semester_name=semester.name,
+        )
+
+    elif module_num == 6:
+        from .report_engine import _build_module6_context
         rd = report.report_data
         module_2 = rd.get('module_2_objectives', '')
         module_4 = rd.get('module_4_evaluation_results', {})
-        context = _build_module5_context(course.name, module_2, module_4)
-        return generate_module_5(context)
+        context = _build_module6_context(course.name, module_2, module_4)
+        return generate_module_6(context)
 
     return None
 
@@ -114,6 +128,7 @@ class ReportGenerateView(APIView):
                 'module_3_status': 'draft',
                 'module_4_status': 'draft',
                 'module_5_status': 'draft',
+                'module_6_status': 'draft',
             },
         )
 
@@ -287,11 +302,17 @@ class ReportExportView(APIView):
             for run in p.runs:
                 _run_font(run)
 
-        # Module 5
-        h = doc.add_heading('五、课程持续改进方案及措施', level=1)
+        # Module 5: 课程目标达成度
+        h = doc.add_heading('五、课程目标达成度', level=1)
         for run in h.runs:
             _run_font(run)
-        _render_module_5_to_docx(doc, rd.get('module_5_improvement_plan', {}))
+        _render_module_5_to_docx(doc, rd.get('module_5_objective_achievement', {}))
+
+        # Module 6: 持续改进方案
+        h = doc.add_heading('六、课程持续改进方案及措施', level=1)
+        for run in h.runs:
+            _run_font(run)
+        _render_module_6_to_docx(doc, rd.get('module_6_improvement_plan', {}))
 
         # Signature lines
         from datetime import date
@@ -369,6 +390,13 @@ class ModuleGenerateView(APIView):
         except Exception as e:
             return api_response(code=500, msg=f'模块生成失败: {str(e)}', http_status=500)
 
+        # Preserve Excel generation flags when regenerating Module 5
+        if module_num == 5:
+            old_data = report.report_data.get(MODULE_MAP[5][0], {}) or {}
+            for flag in ('excel_generated', 'excel_filename'):
+                if flag in old_data:
+                    new_data[flag] = old_data[flag]
+
         report.report_data[MODULE_MAP[module_num][0]] = new_data
         setattr(report, MODULE_MAP[module_num][1], 'draft')
         report.save(update_fields=['report_data', MODULE_MAP[module_num][1]])
@@ -427,7 +455,7 @@ class ModuleExportView(APIView):
 
         from django.http import FileResponse
         module_data_key = MODULE_MAP[module_num][0]
-        module_label = ['', '一', '二', '三', '四', '五'][module_num]
+        module_label = ['', '一', '二', '三', '四', '五', '六'][module_num]
         filename = f'{report.report_name}_{module_label}_{module_data_key}.docx'
 
         return FileResponse(
@@ -570,11 +598,17 @@ class ReportMergeView(APIView):
             _run_font(run)
         _render_module_4_to_docx(doc, rd.get('module_4_evaluation_results', {}))
 
-        # ── Module 5 ──
-        h = doc.add_heading('五、课程持续改进方案及措施', level=1)
+        # ── Module 5: 课程目标达成度 ──
+        h = doc.add_heading('五、课程目标达成度', level=1)
         for run in h.runs:
             _run_font(run)
-        _render_module_5_to_docx(doc, rd.get('module_5_improvement_plan', {}))
+        _render_module_5_to_docx(doc, rd.get('module_5_objective_achievement', {}))
+
+        # ── Module 6: 持续改进方案 ──
+        h = doc.add_heading('六、课程持续改进方案及措施', level=1)
+        for run in h.runs:
+            _run_font(run)
+        _render_module_6_to_docx(doc, rd.get('module_6_improvement_plan', {}))
 
         # Signature lines
         from datetime import date
@@ -613,4 +647,76 @@ class ReportMergeView(APIView):
             as_attachment=True,
             filename=f'{report.report_name}.pdf',
             content_type='application/pdf',
+        )
+
+
+class Module5ExcelGenerateView(APIView):
+    """Generate the course objective achievement Excel for Module 5."""
+
+    def post(self, request, pk):
+        report = _get_report_or_404(pk, request.user)
+        if not report:
+            return api_response(code=404, msg='报告不存在', http_status=404)
+
+        try:
+            buf = generate_achievement_excel(report)
+        except Exception as e:
+            return api_response(code=500, msg=f'Excel生成失败: {str(e)}', http_status=500)
+
+        if buf is None:
+            return api_response(code=400, msg='成绩数据或教学大纲不足，无法生成Excel', http_status=400)
+
+        # Save file to media/excel/
+        import os
+        from django.conf import settings
+        excel_dir = os.path.join(settings.MEDIA_ROOT, 'excel')
+        os.makedirs(excel_dir, exist_ok=True)
+
+        sem_name = report.semester.name if report.semester else ''
+        course_name = report.course.name if report.course else ''
+        filename = f'{sem_name}{course_name}课程达成度计算.xlsx'
+        filepath = os.path.join(excel_dir, filename)
+
+        with open(filepath, 'wb') as f:
+            f.write(buf.getvalue())
+
+        # Store flags in report_data
+        module_data = report.report_data.get('module_5_objective_achievement', {}) or {}
+        module_data['excel_generated'] = True
+        module_data['excel_filename'] = filename
+        report.report_data['module_5_objective_achievement'] = module_data
+        report.save(update_fields=['report_data'])
+
+        return api_response(data={
+            'success': True,
+            'filename': filename,
+        })
+
+
+class Module5ExcelDownloadView(APIView):
+    """Download the generated achievement Excel for Module 5."""
+
+    def get(self, request, pk):
+        report = _get_report_or_404(pk, request.user)
+        if not report:
+            return api_response(code=404, msg='报告不存在', http_status=404)
+
+        module_data = report.report_data.get('module_5_objective_achievement', {}) or {}
+        filename = module_data.get('excel_filename', '')
+        if not filename:
+            return api_response(code=404, msg='Excel文件尚未生成', http_status=404)
+
+        import os
+        from django.conf import settings
+        from django.http import FileResponse
+
+        filepath = os.path.join(settings.MEDIA_ROOT, 'excel', filename)
+        if not os.path.exists(filepath):
+            return api_response(code=404, msg='Excel文件不存在，请重新生成', http_status=404)
+
+        return FileResponse(
+            open(filepath, 'rb'),
+            as_attachment=True,
+            filename=filename,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )

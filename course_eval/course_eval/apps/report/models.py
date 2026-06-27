@@ -44,6 +44,7 @@ class ReportRecord(models.Model):
     module_3_status = models.CharField(max_length=20, default='pending', choices=MODULE_STATUS)
     module_4_status = models.CharField(max_length=20, default='pending', choices=MODULE_STATUS)
     module_5_status = models.CharField(max_length=20, default='pending', choices=MODULE_STATUS)
+    module_6_status = models.CharField(max_length=20, default='pending', choices=MODULE_STATUS)
 
     created_time = models.DateTimeField(auto_now_add=True)
     updated_time = models.DateTimeField(auto_now=True)
