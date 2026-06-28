@@ -8,8 +8,16 @@ import {
   uploadCourseFile, getCourseFiles, deleteCourseFile,
   getWordContent, openExcelForEdit, getWorkingData,
   addRow, updateCell, deleteDataRow, saveWorkingCopy, resetWorkingCopy,
+  validateGradesUpload, resolveCountMismatch, fixHeaders,
   type SimpleItem, type CourseFileRecord, type WordContent, type WorkingData,
+  type GradeValidationResult,
 } from '@/api/excel'
+
+export interface SelectionModel {
+  courseId: number | null
+  classId: number | null
+  semesterName: string | null
+}
 
 export interface UploadSummary {
   total_files: number
@@ -20,6 +28,13 @@ export interface UploadSummary {
 export const useExcelStore = defineStore('excel', () => {
   const uploadedFiles = ref<{ name: string; size: number; status: string }[]>([])
   const uploadSummary = ref<UploadSummary | null>(null)
+
+  // Shared selection state across all modules
+  const selection = ref<SelectionModel>({
+    courseId: null,
+    classId: null,
+    semesterName: null,
+  })
   const rawData = ref<{ headers: string[]; rows: Record<string, unknown>[]; total: number } | null>(null)
   const cleanedData = ref<{ headers: string[]; rows: Record<string, unknown>[]; total: number } | null>(null)
   const cleaningSummary = ref<{
@@ -85,8 +100,8 @@ export const useExcelStore = defineStore('excel', () => {
 
   // ── Course / Class / Semester ──────────────────────────────────────────
 
-  async function fetchCourses() {
-    const data = await getCourses() as unknown as SimpleItem[]
+  async function fetchCourses(params?: { class_id?: number; semester_name?: string }) {
+    const data = await getCourses(params) as unknown as SimpleItem[]
     courses.value = data
     return data
   }
@@ -97,8 +112,8 @@ export const useExcelStore = defineStore('excel', () => {
     return item
   }
 
-  async function fetchClasses() {
-    const data = await getClasses() as unknown as SimpleItem[]
+  async function fetchClasses(params?: { course_id?: number; semester_name?: string }) {
+    const data = await getClasses(params) as unknown as SimpleItem[]
     classes.value = data
     return data
   }
@@ -109,8 +124,8 @@ export const useExcelStore = defineStore('excel', () => {
     return item
   }
 
-  async function fetchSemesters() {
-    const data = await getSemesters() as unknown as SimpleItem[]
+  async function fetchSemesters(params?: { course_id?: number; class_id?: number }) {
+    const data = await getSemesters(params) as unknown as SimpleItem[]
     semesters.value = data
     return data
   }
@@ -137,6 +152,22 @@ export const useExcelStore = defineStore('excel', () => {
   async function removeCourseFile(id: number, courseId: number, classId: number, semesterName: string) {
     await deleteCourseFile(id)
     await fetchCourseFiles(courseId, classId, semesterName)
+  }
+
+  // ── Upload validation ───────────────────────────────────────────────────
+
+  async function validateGrades(courseId: number, classId: number, semesterName: string) {
+    const data = await validateGradesUpload(courseId, classId, semesterName) as unknown as GradeValidationResult
+    return data
+  }
+
+  async function resolveMismatch(courseId: number, classId: number, semesterName: string, choice: 'student_info_wrong' | 'grades_wrong') {
+    await resolveCountMismatch(courseId, classId, semesterName, choice)
+    await fetchCourseFiles(courseId, classId, semesterName)
+  }
+
+  async function repairHeaders(fileId: number, mapping: Record<string, string>) {
+    await fixHeaders(fileId, mapping)
   }
 
   // ── Data Preview – Word ─────────────────────────────────────────────────
@@ -224,11 +255,13 @@ export const useExcelStore = defineStore('excel', () => {
     uploadedFiles, uploadSummary, rawData, cleanedData, cleaningSummary,
     upload, fetchRawData, runClean, fetchCleanedData,
     courses, classes, semesters,
+    selection,
     courseFiles,
     fetchCourses, addCourse,
     fetchClasses, addClass,
     fetchSemesters, addSemester,
     fetchCourseFiles, uploadOneCourseFile, removeCourseFile,
+    validateGrades, resolveMismatch, repairHeaders,
     // Data Preview
     wordContent,
     workingData, hasUnsavedChanges, editingFileId, dirtyCells,

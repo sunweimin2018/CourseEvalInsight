@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useExcelStore } from '@/store/excel'
 import { ElMessage } from 'element-plus'
 import { Refresh, Download, View, Edit } from '@element-plus/icons-vue'
@@ -10,7 +11,6 @@ import { GridComponent, TooltipComponent, TitleComponent, LegendComponent } from
 import { CanvasRenderer } from 'echarts/renderers'
 import type { EChartsOption } from 'echarts'
 import CourseSelectors from '@/components/CourseSelectors.vue'
-import type { SelectionModel } from '@/components/CourseSelectors.vue'
 import { generateReport, getReportPreview, downloadReport, getReports } from '@/api/report'
 import type { ReportPreview, ReportData, ReportRecord } from '@/api/report'
 
@@ -36,10 +36,7 @@ interface EvalBlock {
 }
 
 const store = useExcelStore()
-
-const selection = ref<SelectionModel>({
-  courseId: null, classId: null, semesterName: null,
-})
+const { selection } = storeToRefs(store)
 
 const generating = ref(false)
 const loadingPreview = ref(false)

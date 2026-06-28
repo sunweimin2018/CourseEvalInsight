@@ -21,6 +21,7 @@ from .parser import parse_excel
 from .cleaner import clean_and_fuse
 from .word_parser import parse_docx, extract_syllabus_fields
 from . import data_handler
+from . import validation as upload_validation
 
 
 def _cache_key(user_id, suffix):
@@ -158,9 +159,37 @@ class CleanedDataPreviewView(APIView):
 class BaseUserListCreateView(APIView):
     model = None
     serializer_class = None
+    # Subclasses set this to the field name on CourseFileRecord that links to this model
+    _file_record_field = None
+
+    def _apply_association_filters(self, qs, request):
+        """Filter qs to only items that have CourseFileRecord associations matching the params."""
+        file_qs = CourseFileRecord.objects.filter(user=request.user)
+
+        course_id = request.query_params.get('course_id')
+        class_id = request.query_params.get('class_id')
+        semester_name = request.query_params.get('semester_name')
+
+        if not any([course_id, class_id, semester_name]):
+            return qs
+
+        if course_id:
+            file_qs = file_qs.filter(course_id=course_id)
+        if class_id:
+            file_qs = file_qs.filter(class_group_id=class_id)
+        if semester_name:
+            semester = Semester.objects.filter(name=semester_name, user=request.user).first()
+            if semester:
+                file_qs = file_qs.filter(semester=semester)
+            else:
+                return qs.none()
+
+        linked_ids = file_qs.values_list(self._file_record_field, flat=True).distinct()
+        return qs.filter(id__in=linked_ids)
 
     def get(self, request):
         qs = self.model.objects.filter(user=request.user)
+        qs = self._apply_association_filters(qs, request)
         ser = self.serializer_class(qs, many=True)
         return api_response(data=ser.data)
 
@@ -178,16 +207,19 @@ class BaseUserListCreateView(APIView):
 class CourseListView(BaseUserListCreateView):
     model = Course
     serializer_class = CourseSerializer
+    _file_record_field = 'course_id'
 
 
 class ClassGroupListView(BaseUserListCreateView):
     model = ClassGroup
     serializer_class = ClassGroupSerializer
+    _file_record_field = 'class_group_id'
 
 
 class SemesterListView(BaseUserListCreateView):
     model = Semester
     serializer_class = SemesterSerializer
+    _file_record_field = 'semester_id'
 
 
 # ── Course files ────────────────────────────────────────────────────────────
@@ -264,6 +296,29 @@ class CourseFileListView(APIView):
 class CourseFileDeleteView(APIView):
     def delete(self, request, pk):
         record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+
+        # Cascade: deleting syllabus also removes student_info and grades;
+        # deleting student_info also removes grades.
+        cascade_types = []
+        if record.file_type == 'syllabus':
+            cascade_types = ['student_info', 'grades']
+        elif record.file_type == 'student_info':
+            cascade_types = ['grades']
+
+        if cascade_types:
+            downstream = CourseFileRecord.objects.filter(
+                course=record.course,
+                class_group=record.class_group,
+                semester=record.semester,
+                user=request.user,
+                file_type__in=cascade_types,
+            )
+            for dr in downstream:
+                dr_path = os.path.join(settings.MEDIA_ROOT, dr.file_path)
+                if os.path.exists(dr_path):
+                    os.remove(dr_path)
+                dr.delete()
+
         full_path = os.path.join(settings.MEDIA_ROOT, record.file_path)
         if os.path.exists(full_path):
             os.remove(full_path)
@@ -297,6 +352,7 @@ class WordContentView(APIView):
         out = {
             'paragraphs': result['paragraphs'],
             'tables': result['tables'],
+            'body_elements': result.get('body_elements', []),
             'file_name': record.file_name,
             'fields': fields,
         }
@@ -410,3 +466,59 @@ class ResetWorkingCopyView(APIView):
             'rows': data['rows'],
             'total': len(data['rows']),
         }, msg='已重置为原始数据')
+
+
+# ── Upload validation ─────────────────────────────────────────────────────────
+
+class GradesValidationView(APIView):
+    def post(self, request):
+        course_id = request.data.get('course_id')
+        class_id = request.data.get('class_id')
+        semester_name = request.data.get('semester_name')
+        if not all([course_id, class_id, semester_name]):
+            return api_response(code=400, msg='参数不完整', http_status=400)
+        try:
+            result = upload_validation.validate_grades_upload(
+                request.user, course_id, class_id, semester_name,
+            )
+        except ValueError as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+        except Exception as e:
+            return api_response(code=500, msg=f'验证过程出错：{e}', http_status=500)
+        return api_response(data=result)
+
+
+class CountMismatchResolveView(APIView):
+    def post(self, request):
+        course_id = request.data.get('course_id')
+        class_id = request.data.get('class_id')
+        semester_name = request.data.get('semester_name')
+        user_choice = request.data.get('user_choice')
+        if not all([course_id, class_id, semester_name, user_choice]):
+            return api_response(code=400, msg='参数不完整', http_status=400)
+        if user_choice not in ('student_info_wrong', 'grades_wrong'):
+            return api_response(code=400, msg='无效的选择', http_status=400)
+        try:
+            deleted = upload_validation.resolve_count_mismatch(
+                request.user, course_id, class_id, semester_name, user_choice,
+            )
+        except ValueError as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+        except Exception as e:
+            return api_response(code=500, msg=f'处理出错：{e}', http_status=500)
+        return api_response(data={'deleted': deleted}, msg='处理成功')
+
+
+class FixHeadersView(APIView):
+    def post(self, request, pk):
+        record = get_object_or_404(CourseFileRecord, id=pk, user=request.user)
+        mapping = request.data.get('mapping', {})
+        if not mapping:
+            return api_response(code=400, msg='请提供 header mapping', http_status=400)
+        try:
+            new_headers = upload_validation.fix_grades_headers(record, request.user.id, mapping)
+        except ValueError as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+        except Exception as e:
+            return api_response(code=500, msg=f'修复表头出错：{e}', http_status=500)
+        return api_response(data={'headers': new_headers}, msg='表头更新成功')

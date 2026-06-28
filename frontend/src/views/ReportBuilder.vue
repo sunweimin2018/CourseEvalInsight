@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Check, Refresh, Download, Document,
 } from '@element-plus/icons-vue'
 import CourseSelectors from '@/components/CourseSelectors.vue'
-import type { SelectionModel } from '@/components/CourseSelectors.vue'
 import { useExcelStore } from '@/store/excel'
 import {
   generateReport, getReportPreview, getReports,
@@ -21,9 +21,7 @@ import Module5Editor from '@/components/report/Module5Editor.vue'
 import Module6Editor from '@/components/report/Module6Editor.vue'
 
 const store = useExcelStore()
-
-// ── Selection ──────────────────────────────────────────────────────────────
-const selection = ref<SelectionModel>({ courseId: null, classId: null, semesterName: null })
+const { selection } = storeToRefs(store)
 const availableTypes = ref<string[]>([])
 
 // ── Report state ────────────────────────────────────────────────────────────

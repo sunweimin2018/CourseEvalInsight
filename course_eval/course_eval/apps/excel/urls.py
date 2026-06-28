@@ -24,4 +24,8 @@ urlpatterns = [
     path('course-files/<int:pk>/data/delete-row/', views.DeleteRowView.as_view(), name='course-file-delete-row'),
     path('course-files/<int:pk>/data/save/', views.SaveSnapshotView.as_view(), name='course-file-save'),
     path('course-files/<int:pk>/data/reset/', views.ResetWorkingCopyView.as_view(), name='course-file-reset'),
+    # Upload validation
+    path('course-files/validate-grades/', views.GradesValidationView.as_view(), name='course-file-validate-grades'),
+    path('course-files/resolve-mismatch/', views.CountMismatchResolveView.as_view(), name='course-file-resolve-mismatch'),
+    path('course-files/<int:pk>/fix-headers/', views.FixHeadersView.as_view(), name='course-file-fix-headers'),
 ]

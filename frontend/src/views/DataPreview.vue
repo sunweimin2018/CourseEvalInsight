@@ -1,19 +1,16 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useExcelStore } from '@/store/excel'
 import { ElMessage } from 'element-plus'
 import { Document, DataBoard, Edit } from '@element-plus/icons-vue'
 import CourseSelectors from '@/components/CourseSelectors.vue'
 import WordDocViewer from '@/components/WordDocViewer.vue'
 import ExcelDataEditor from '@/components/ExcelDataEditor.vue'
-import type { SelectionModel } from '@/components/CourseSelectors.vue'
 import type { CourseFileRecord } from '@/api/excel'
 
 const store = useExcelStore()
-
-const selection = ref<SelectionModel>({
-  courseId: null, classId: null, semesterName: null,
-})
+const { selection } = storeToRefs(store)
 
 const selectedFileType = ref<'syllabus' | 'student_info' | 'grades' | null>(null)
 const loading = ref(false)

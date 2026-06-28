@@ -2,6 +2,7 @@
 import { ref, watch, onMounted } from 'vue'
 import { useExcelStore } from '@/store/excel'
 import { ElMessage } from 'element-plus'
+import type { SimpleItem } from '@/api/excel'
 
 export interface SelectionModel {
   courseId: number | null
@@ -11,6 +12,7 @@ export interface SelectionModel {
 
 const props = defineProps<{
   modelValue: SelectionModel
+  cascade?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -22,25 +24,43 @@ const store = useExcelStore()
 const courseOptions = ref<{ id: number; name: string }[]>([])
 const classOptions = ref<{ id: number; name: string }[]>([])
 
-// Fixed semester list: 2020-2021 ~ 2035-2036, each year has 第一学期 and 第二学期
 function generateSemesterOptions() {
   const options: { value: string; label: string }[] = []
-  for (let y = 2020; y <= 2035; y++) {
+  for (let y = 2025; y < 2025 + 10; y++) {
     options.push({ value: `${y}-${y + 1}年第一学期`, label: `${y}-${y + 1}年第一学期` })
     options.push({ value: `${y}-${y + 1}年第二学期`, label: `${y}-${y + 1}年第二学期` })
   }
   return options
 }
-const semesterOptions = generateSemesterOptions()
+
+const generatedSemesters = generateSemesterOptions()
+
+function mergeSemesters(dbItems: SimpleItem[]) {
+  const map = new Map<string, { value: string; label: string }>()
+  for (const s of generatedSemesters) {
+    map.set(s.value, s)
+  }
+  for (const s of dbItems) {
+    if (!map.has(s.name)) {
+      map.set(s.name, { value: s.name, label: s.name })
+    }
+  }
+  return Array.from(map.values())
+}
+
+const semesterOptions = ref<{ value: string; label: string }[]>([...generatedSemesters])
 
 const selectedCourse = ref<number | null>(props.modelValue.courseId)
 const selectedClass = ref<number | null>(props.modelValue.classId)
 const selectedSemester = ref<string | null>(props.modelValue.semesterName)
 
+// Guard to prevent cascading reload loops
+let reloading = false
+
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const dialogInput = ref('')
-const dialogType = ref<'course' | 'class'>('course')
+const dialogType = ref<'course' | 'class' | 'semester'>('course')
 const dialogLoading = ref(false)
 
 function emitSelection() {
@@ -51,27 +71,77 @@ function emitSelection() {
   })
 }
 
-async function loadOptions() {
-  const [courses, classes] = await Promise.all([
+async function loadAllOptions() {
+  await Promise.all([
     store.fetchCourses(),
     store.fetchClasses(),
+    store.fetchSemesters(),
   ])
-  courseOptions.value = courses
-  classOptions.value = classes
+  courseOptions.value = store.courses
+  classOptions.value = store.classes
+  semesterOptions.value = mergeSemesters(store.semesters)
 }
 
-function openAddDialog(type: 'course' | 'class') {
+async function reloadFiltered(by: 'course' | 'class' | 'semester') {
+  reloading = true
+  const cid = selectedCourse.value
+  const clid = selectedClass.value
+  const sname = selectedSemester.value
+  let needEmit = false
+
+  if (by !== 'course') {
+    const courses = await store.fetchCourses({
+      class_id: clid ?? undefined,
+      semester_name: sname ?? undefined,
+    })
+    courseOptions.value = courses
+    if (selectedCourse.value && !courses.find((c) => c.id === selectedCourse.value)) {
+      selectedCourse.value = null
+      needEmit = true
+    }
+  }
+
+  if (by !== 'class') {
+    const classes = await store.fetchClasses({
+      course_id: cid ?? undefined,
+      semester_name: sname ?? undefined,
+    })
+    classOptions.value = classes
+    if (selectedClass.value && !classes.find((c) => c.id === selectedClass.value)) {
+      selectedClass.value = null
+      needEmit = true
+    }
+  }
+
+  if (by !== 'semester') {
+    const semesters = await store.fetchSemesters({
+      course_id: cid ?? undefined,
+      class_id: clid ?? undefined,
+    })
+    semesterOptions.value = mergeSemesters(semesters)
+    if (selectedSemester.value && !semesterOptions.value.find((s) => s.value === selectedSemester.value)) {
+      selectedSemester.value = null
+      needEmit = true
+    }
+  }
+
+  reloading = false
+  if (needEmit) emitSelection()
+}
+
+function openAddDialog(type: 'course' | 'class' | 'semester') {
   dialogType.value = type
   dialogInput.value = ''
-  const labels: Record<string, string> = { course: '课程名称', class: '班级' }
+  const labels: Record<string, string> = { course: '课程名称', class: '班级', semester: '学期' }
   dialogTitle.value = '添加新' + labels[type]
   dialogVisible.value = true
 }
 
-function handleSelectChange(type: 'course' | 'class', value: unknown) {
+function handleSelectChange(type: 'course' | 'class' | 'semester', value: unknown) {
   if (value === '__add__') {
     if (type === 'course') selectedCourse.value = null
-    else selectedClass.value = null
+    else if (type === 'class') selectedClass.value = null
+    else if (type === 'semester') selectedSemester.value = null
     openAddDialog(type)
   }
 }
@@ -84,15 +154,18 @@ async function confirmAdd() {
   }
   dialogLoading.value = true
   try {
-    let item: { id: number; name: string } | null = null
     if (dialogType.value === 'course') {
-      item = await store.addCourse(name)
+      const item = await store.addCourse(name)
       courseOptions.value = store.courses
       selectedCourse.value = item.id
-    } else {
-      item = await store.addClass(name)
+    } else if (dialogType.value === 'class') {
+      const item = await store.addClass(name)
       classOptions.value = store.classes
       selectedClass.value = item.id
+    } else {
+      const item = await store.addSemester(name)
+      semesterOptions.value = mergeSemesters(store.semesters)
+      selectedSemester.value = item.name
     }
     dialogVisible.value = false
     ElMessage.success('添加成功')
@@ -104,19 +177,36 @@ async function confirmAdd() {
 }
 
 // Sync from parent
-watch(() => props.modelValue, (v) => {
-  if (v.courseId !== selectedCourse.value) selectedCourse.value = v.courseId
-  if (v.classId !== selectedClass.value) selectedClass.value = v.classId
-  if (v.semesterName !== selectedSemester.value) selectedSemester.value = v.semesterName
-}, { deep: true })
+watch(
+  () => props.modelValue,
+  (v) => {
+    if (v.courseId !== selectedCourse.value) selectedCourse.value = v.courseId
+    if (v.classId !== selectedClass.value) selectedClass.value = v.classId
+    if (v.semesterName !== selectedSemester.value) selectedSemester.value = v.semesterName
+  },
+  { deep: true },
+)
 
-// Sync to parent
-watch([selectedCourse, selectedClass, selectedSemester], () => {
+watch(selectedCourse, () => {
+  if (reloading) return
   emitSelection()
+  if (props.cascade !== false) reloadFiltered('course')
+})
+
+watch(selectedClass, () => {
+  if (reloading) return
+  emitSelection()
+  if (props.cascade !== false) reloadFiltered('class')
+})
+
+watch(selectedSemester, () => {
+  if (reloading) return
+  emitSelection()
+  if (props.cascade !== false) reloadFiltered('semester')
 })
 
 onMounted(() => {
-  loadOptions()
+  loadAllOptions()
 })
 </script>
 
@@ -163,14 +253,28 @@ onMounted(() => {
           style="width: 100%"
           clearable
           filterable
+          @change="(v: unknown) => handleSelectChange('semester', v)"
         >
-          <el-option v-for="s in semesterOptions" :key="s.value" :label="s.label" :value="s.value" />
+          <el-option
+            v-for="s in semesterOptions"
+            :key="s.value"
+            :label="s.label"
+            :value="s.value"
+          />
+          <el-option value="__add__" style="color: #409eff; font-weight: 500">
+            + 添加新学期
+          </el-option>
         </el-select>
       </el-col>
     </el-row>
 
     <!-- Add dialog -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="400px" :close-on-click-modal="false">
+    <el-dialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      width="400px"
+      :close-on-click-modal="false"
+    >
       <el-input
         v-model="dialogInput"
         :placeholder="'请输入' + dialogTitle.replace('添加新', '')"

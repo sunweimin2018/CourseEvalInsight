@@ -26,6 +26,7 @@ SECTION_HEADINGS = [
     '参考教材与网站',
     '课程目标',
     '教学目标',
+    '专业类课程的课程目标及支撑专业的毕业要求及其指标点',
 ]
 
 # Labels that map directly to simple single-value fields (label: value pattern).
@@ -395,14 +396,21 @@ def parse_docx(file_path):
 
     # ── Build body element order (interleaved paragraphs and tables) ────
     para_lookup = {p['index']: i for i, p in enumerate(paragraphs)}
-    body_elements = []
+    _body_elements = []
+    api_body_elements = []
     p_idx = 0
     t_idx = 0
     for child in doc.element.body:
         tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
         if tag == 'p':
             if p_idx in para_lookup:
-                body_elements.append({'type': 'p', 'text': paragraphs[para_lookup[p_idx]]['text']})
+                para = paragraphs[para_lookup[p_idx]]
+                _body_elements.append({'type': 'p', 'text': para['text']})
+                api_body_elements.append({
+                    'type': 'paragraph',
+                    'text': para['text'],
+                    'style': para['style'],
+                })
             p_idx += 1
         elif tag == 'tbl':
             if t_idx < len(tables_rich):
@@ -410,14 +418,16 @@ def parse_docx(file_path):
                 max_grid_col = max((c for (_r, c) in rich['merged_map']), default=-1)
                 num_cols = max_grid_col + 1
                 grid = _build_table_grid(rich['merged_map'], rich['origins'], rich['num_rows'], num_cols)
-                body_elements.append({'type': 't', 'num_cols': num_cols, 'grid': grid})
+                _body_elements.append({'type': 't', 'num_cols': num_cols, 'grid': grid})
+                api_body_elements.append({'type': 'table', 'table_index': t_idx})
             t_idx += 1
 
     return {
         'paragraphs': paragraphs,
         'tables': tables,
+        'body_elements': api_body_elements,
         '_tables_rich': tables_rich,
-        '_body_elements': body_elements,
+        '_body_elements': _body_elements,
     }
 
 

@@ -28,24 +28,24 @@ export interface SimpleItem {
   create_time: string
 }
 
-export function getCourses() {
-  return request.get('/excel/courses/')
+export function getCourses(params?: { class_id?: number; semester_name?: string }) {
+  return request.get('/excel/courses/', { params })
 }
 
 export function createCourse(name: string) {
   return request.post('/excel/courses/', { name })
 }
 
-export function getClasses() {
-  return request.get('/excel/classes/')
+export function getClasses(params?: { course_id?: number; semester_name?: string }) {
+  return request.get('/excel/classes/', { params })
 }
 
 export function createClass(name: string) {
   return request.post('/excel/classes/', { name })
 }
 
-export function getSemesters() {
-  return request.get('/excel/semesters/')
+export function getSemesters(params?: { course_id?: number; class_id?: number }) {
+  return request.get('/excel/semesters/', { params })
 }
 
 export function createSemester(name: string) {
@@ -93,10 +93,18 @@ export function deleteCourseFile(id: number) {
 
 // ── Data Preview – Word ──────────────────────────────────────────────────────
 
+export interface WordBodyElement {
+  type: 'paragraph' | 'table'
+  text?: string
+  style?: string
+  table_index?: number
+}
+
 export interface WordContent {
   file_name: string
   paragraphs: { index: number; text: string; style: string }[]
   tables: { index: number; headers: string[]; rows: string[][] }[]
+  body_elements: WordBodyElement[]
 }
 
 export function getWordContent(fileId: number) {
@@ -146,4 +154,53 @@ export function saveWorkingCopy(fileId: number) {
 
 export function resetWorkingCopy(fileId: number) {
   return request.post(`/excel/course-files/${fileId}/data/reset/`)
+}
+
+// ── Upload validation ────────────────────────────────────────────────────────
+
+export interface ValidationComparison {
+  expected: string
+  current: string | null
+  match: boolean
+}
+
+export interface GradeValidationResult {
+  student_count: {
+    match: boolean
+    student_info_count: number
+    grades_count: number
+  }
+  header_validation: {
+    match: boolean
+    expected_items: string[]
+    grade_columns: string[]
+    comparisons: ValidationComparison[]
+    error?: string
+  } | null
+}
+
+export function validateGradesUpload(courseId: number, classId: number, semesterName: string) {
+  return request.post('/excel/course-files/validate-grades/', {
+    course_id: courseId,
+    class_id: classId,
+    semester_name: semesterName,
+  })
+}
+
+export function resolveCountMismatch(
+  courseId: number,
+  classId: number,
+  semesterName: string,
+  userChoice: 'student_info_wrong' | 'grades_wrong',
+) {
+  return request.post('/excel/course-files/resolve-mismatch/', {
+    course_id: courseId,
+    class_id: classId,
+    semester_name: semesterName,
+    user_choice: userChoice,
+  })
+}
+
+export function fixHeaders(fileId: number, mapping: Record<string, string>) {
+  return request.post(`/excel/course-files/${fileId}/fix-headers/`, { mapping })
 }
