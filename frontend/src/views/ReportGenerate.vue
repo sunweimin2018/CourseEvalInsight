@@ -36,7 +36,7 @@ interface EvalBlock {
 }
 
 const store = useExcelStore()
-const { selection } = storeToRefs(store)
+const { selection, validationStatus } = storeToRefs(store)
 
 const generating = ref(false)
 const loadingPreview = ref(false)
@@ -196,7 +196,7 @@ const fileStatusText: Record<string, string> = {
         <el-button
           type="primary"
           :loading="generating"
-          :disabled="availableTypes.length < 3"
+          :disabled="availableTypes.length < 3 || validationStatus !== 'passed'"
           @click="handleGenerate"
         >
           <el-icon style="margin-right: 6px"><Refresh /></el-icon>
@@ -235,7 +235,20 @@ const fileStatusText: Record<string, string> = {
       </div>
     </el-card>
 
-    <el-empty v-if="!selection.courseId || !selection.classId || !selection.semesterName" description="请先选择课程、班级和学期" />
+    <el-result v-if="!selection.courseId || !selection.classId || !selection.semesterName" icon="info" title="请先选择课程、班级和学期" />
+
+    <!-- Validation gate -->
+    <div v-if="selection.courseId && selection.classId && selection.semesterName && availableTypes.length === 3 && validationStatus !== 'passed'" style="margin-bottom: 20px">
+      <el-card style="border: 2px solid #e6a23c; background: #fdf6ec">
+        <el-result icon="warning" title="数据尚未通过验证" sub-title="请先到文件上传页面完成数据验证，验证通过后方可生成报告">
+          <template #extra>
+            <router-link to="/excel/upload">
+              <el-button type="warning" size="large">前往文件上传页面</el-button>
+            </router-link>
+          </template>
+        </el-result>
+      </el-card>
+    </div>
 
     <!-- Loading -->
     <el-card v-if="loadingPreview" style="margin-top: 20px">
@@ -341,7 +354,7 @@ const fileStatusText: Record<string, string> = {
           <span style="font-weight: 700">四、课程评价结果</span>
         </template>
         <div v-if="!reportData.module_4_evaluation_results.generated">
-          <el-empty description="暂无成绩数据" />
+          <el-result icon="warning" title="暂无成绩数据" />
         </div>
         <div v-else>
           <div v-for="(stats, colName) in reportData.module_4_evaluation_results.grade_analysis" :key="colName" style="margin-bottom: 32px">

@@ -533,16 +533,36 @@ def _parse_syllabus(syllabus_file):
     )
 
 
+def _get_file_metadata(course_id, class_id, semester, user_id, file_type):
+    """Get course metadata extracted from a file's title row."""
+    from course_eval.apps.excel.models import CourseFileRecord
+    record = CourseFileRecord.objects.filter(
+        course_id=course_id, class_group_id=class_id,
+        semester=semester, user_id=user_id, file_type=file_type,
+    ).first()
+    if record and record.title_metadata:
+        return record.title_metadata
+    return {}
+
+
 # ── Per-module generation functions ────────────────────────────────────────
 
-def generate_module_1(course, class_group, syllabus_fields, student_stats, raw_table_kv):
-    """Generate Module 1: Course Basic Information Table."""
+def generate_module_1(course, class_group, syllabus_fields, student_stats, raw_table_kv, grades_meta=None, student_info_meta=None):
+    """Generate Module 1: Course Basic Information Table.
+
+    Priority for course identity fields:
+      1. grades_meta (from grades file title row — most reliable)
+      2. syllabus_fields (from Word syllabus)
+      3. course / class_group model names (fallback)
+    """
+    grades_meta = grades_meta or {}
+    student_info_meta = student_info_meta or {}
     return {
-        'course_name': syllabus_fields.get('course_name', course.name),
-        'course_code': syllabus_fields.get('course_code', '未填写'),
+        'course_name': grades_meta.get('course_name') or syllabus_fields.get('course_name', course.name),
+        'course_code': syllabus_fields.get('course_code') or grades_meta.get('course_code', '未填写'),
         'teaching_class': '、'.join(student_stats.get('classes', [])) or syllabus_fields.get('teaching_class', class_group.name),
         'student_count': student_stats.get('total', '未填写'),
-        'course_seq': syllabus_fields.get('course_seq', '未填写'),
+        'course_seq': student_info_meta.get('course_seq') or grades_meta.get('course_seq') or syllabus_fields.get('course_seq', '未填写'),
         'total_hours': syllabus_fields.get('total_hours', '未填写'),
         'credits': syllabus_fields.get('credits', '未填写'),
         'textbook': syllabus_fields.get('textbook', '未填写'),
@@ -2221,7 +2241,12 @@ def generate_report(user_id, course_id, class_id, semester_name):
         student_stats = _analyze_student_info(info_data['headers'], info_data['rows'])
 
     evaluation_standards = syllabus_fields.get('evaluation_standards')
-    module_1 = generate_module_1(course, class_group, syllabus_fields, student_stats, raw_table_kv)
+
+    # Get title metadata from student_info and grades files for course identity fields
+    student_info_meta = _get_file_metadata(course_id, class_id, semester, user_id, 'student_info')
+    grades_meta = _get_file_metadata(course_id, class_id, semester, user_id, 'grades')
+
+    module_1 = generate_module_1(course, class_group, syllabus_fields, student_stats, raw_table_kv, grades_meta, student_info_meta)
     module_2 = generate_module_2(syllabus_fields)
     module_4 = generate_module_4(grades_file, user_id, evaluation_standards)
 

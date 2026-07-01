@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import {
   uploadFiles, getRawData, cleanData, getCleanedData,
   getCourses, createCourse,
@@ -8,7 +8,7 @@ import {
   uploadCourseFile, getCourseFiles, deleteCourseFile,
   getWordContent, openExcelForEdit, getWorkingData,
   addRow, updateCell, deleteDataRow, saveWorkingCopy, resetWorkingCopy,
-  validateGradesUpload, resolveCountMismatch, fixHeaders,
+  validateGradesUpload, resolveCountMismatch, fixHeaders, forcePassValidation,
   type SimpleItem, type CourseFileRecord, type WordContent, type WorkingData,
   type GradeValidationResult,
 } from '@/api/excel'
@@ -51,6 +51,15 @@ export const useExcelStore = defineStore('excel', () => {
 
   // Course files (scoped by the course/class/semester passed into each action)
   const courseFiles = ref<CourseFileRecord[]>([])
+
+  // Validation status: all 3 files must be 'passed'
+  const validationStatus = computed(() => {
+    const files = courseFiles.value
+    if (files.length < 3) return 'pending'
+    if (files.every(f => f.validation_status === 'passed')) return 'passed'
+    if (files.some(f => f.validation_status === 'failed')) return 'failed'
+    return 'pending'
+  })
 
   // Data Preview – Word
   const wordContent = ref<WordContent | null>(null)
@@ -145,8 +154,9 @@ export const useExcelStore = defineStore('excel', () => {
   }
 
   async function uploadOneCourseFile(courseId: number, classId: number, semesterName: string, fileType: string, file: File) {
-    await uploadCourseFile(courseId, classId, semesterName, fileType, file)
+    const resp = await uploadCourseFile(courseId, classId, semesterName, fileType, file) as unknown as { data: CourseFileRecord }
     await fetchCourseFiles(courseId, classId, semesterName)
+    return resp.data
   }
 
   async function removeCourseFile(id: number, courseId: number, classId: number, semesterName: string) {
@@ -168,6 +178,11 @@ export const useExcelStore = defineStore('excel', () => {
 
   async function repairHeaders(fileId: number, mapping: Record<string, string>) {
     await fixHeaders(fileId, mapping)
+  }
+
+  async function forcePassAndRefresh(courseId: number, classId: number, semesterName: string) {
+    await forcePassValidation(courseId, classId, semesterName)
+    await fetchCourseFiles(courseId, classId, semesterName)
   }
 
   // ── Data Preview – Word ─────────────────────────────────────────────────
@@ -256,12 +271,12 @@ export const useExcelStore = defineStore('excel', () => {
     upload, fetchRawData, runClean, fetchCleanedData,
     courses, classes, semesters,
     selection,
-    courseFiles,
+    courseFiles, validationStatus,
     fetchCourses, addCourse,
     fetchClasses, addClass,
     fetchSemesters, addSemester,
     fetchCourseFiles, uploadOneCourseFile, removeCourseFile,
-    validateGrades, resolveMismatch, repairHeaders,
+    validateGrades, resolveMismatch, repairHeaders, forcePassAndRefresh,
     // Data Preview
     wordContent,
     workingData, hasUnsavedChanges, editingFileId, dirtyCells,

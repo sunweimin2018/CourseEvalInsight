@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { Edit } from '@element-plus/icons-vue'
+import ModuleActionBar from './ModuleActionBar.vue'
 
 const props = defineProps<{
   modelValue: Record<string, unknown> | null
@@ -43,6 +43,10 @@ watch(() => props.modelValue, (v) => {
   }
 }, { immediate: true })
 
+function isUnfilled(key: string): boolean {
+  return form.value[key] === '未填写'
+}
+
 function onInput() {
   emit('update:modelValue', { ...form.value })
 }
@@ -56,18 +60,32 @@ const readonly = computed(() => props.status === 'confirmed')
       <el-row :gutter="16">
         <el-col v-for="f in fields" :key="f.key" :span="12">
           <el-form-item :label="f.label">
-            <el-input :model-value="form[f.key]" @input="(v: string) => { form[f.key] = v; onInput() }" />
+            <el-input
+              :model-value="form[f.key]"
+              :class="{ 'unfilled-input': isUnfilled(f.key) }"
+              @input="(v: string) => { form[f.key] = v; onInput() }"
+            />
           </el-form-item>
         </el-col>
       </el-row>
     </el-form>
-    <div style="margin-top: 12px; display: flex; gap: 8px">
-      <el-button :loading="loading" @click="emit('regenerate')">
-        <el-icon><Edit /></el-icon> 重新生成
-      </el-button>
-      <el-button type="primary" :loading="loading" :disabled="status === 'confirmed'" @click="emit('save')">保存草稿</el-button>
-      <el-button type="success" :loading="loading" :disabled="status === 'confirmed'" @click="emit('confirm')">确认</el-button>
-      <el-button :loading="loading" @click="emit('export')">导出Word</el-button>
-    </div>
+    <ModuleActionBar
+      :loading="loading"
+      :regenerate-disabled="readonly"
+      :save-disabled="readonly"
+      :confirm-disabled="readonly"
+      @regenerate="emit('regenerate')"
+      @save="emit('save')"
+      @confirm="emit('confirm')"
+      @export="emit('export')"
+    />
   </div>
 </template>
+
+<style scoped>
+.unfilled-input :deep(.el-input__inner) {
+  color: #e6a23c;
+  font-weight: 700;
+  border-color: #e6a23c;
+}
+</style>

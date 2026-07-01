@@ -10,7 +10,7 @@ defineProps<{
 <template>
   <el-card>
     <template #header>
-      <span style="font-weight: 600">课程大纲 - {{ content?.file_name || '' }}</span>
+      <span style="font-weight: 600">{{ $t('word.title', { name: content?.file_name || '' }) }}</span>
     </template>
 
     <div v-if="loading" style="text-align: center; padding: 60px 0">
@@ -21,10 +21,10 @@ defineProps<{
           <path d="M512 640a48 48 0 1 1 0 96 48 48 0 0 1 0-96z"/>
         </svg>
       </el-icon>
-      <p style="color: #909399; margin-top: 12px">加载中...</p>
+      <p style="color: #909399; margin-top: 12px">{{ $t('word.loading') }}</p>
     </div>
 
-    <el-empty v-else-if="!content" description="请先选择课程大纲文件" />
+    <el-result v-else-if="!content" icon="info" :title="$t('word.selectFirst')" />
 
     <div v-else class="docx-content">
       <!-- Render in document order -->
@@ -92,7 +92,7 @@ defineProps<{
         </div>
       </template>
 
-      <el-empty v-if="!content.paragraphs.length && !content.tables.length" description="文档内容为空" />
+      <el-result v-if="!content.paragraphs.length && !content.tables.length" icon="warning" :title="$t('word.empty')" />
     </div>
   </el-card>
 </template>

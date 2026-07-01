@@ -7,6 +7,7 @@ from .serializers import ReportRecordSerializer, ReportGenerateSerializer, Modul
 from .report_engine import (
     generate_report, generate_module_1, generate_module_2, generate_module_3,
     generate_module_4, generate_module_5, generate_module_6, _parse_syllabus, _analyze_student_info,
+    _get_file_metadata,
 )
 from .report_engine import _find_file
 from .module_docx import (
@@ -24,6 +25,15 @@ MODULE_MAP = {
     4: ('module_4_evaluation_results', 'module_4_status'),
     5: ('module_5_objective_achievement', 'module_5_status'),
     6: ('module_6_improvement_plan', 'module_6_status'),
+}
+
+MODULE_NAMES = {
+    1: '课程基本信息表',
+    2: '课程目标',
+    3: '课程评价标准',
+    4: '课程评价结果',
+    5: '课程目标达成度',
+    6: '持续改进方案',
 }
 
 EXPORT_FUNCTIONS = {
@@ -58,7 +68,9 @@ def _regenerate_module(report, module_num):
             from course_eval.apps.excel.data_handler import get_effective_data
             info_data = get_effective_data(report.student_info_file, user_id)
             student_stats = _analyze_student_info(info_data['headers'], info_data['rows'])
-        return generate_module_1(course, class_group, syllabus_fields, student_stats, raw_table_kv)
+        grades_meta = _get_file_metadata(course.id, class_group.id, semester, user_id, 'grades')
+        student_info_meta = _get_file_metadata(course.id, class_group.id, semester, user_id, 'student_info')
+        return generate_module_1(course, class_group, syllabus_fields, student_stats, raw_table_kv, grades_meta, student_info_meta)
 
     elif module_num == 2:
         syllabus_fields = _parse_syllabus(report.syllabus_file)
@@ -474,16 +486,18 @@ class ReportMergeView(APIView):
             return api_response(code=404, msg='报告不存在', http_status=404)
 
         # Check all modules are confirmed
-        unconfirmed = []
+        unconfirmed_names = []
+        unconfirmed_nums = []
         for num, (_, status_field) in MODULE_MAP.items():
             if getattr(report, status_field) != 'confirmed':
-                unconfirmed.append(f'模块{num}')
+                unconfirmed_names.append(MODULE_NAMES.get(num, f'模块{num}'))
+                unconfirmed_nums.append(num)
 
-        if unconfirmed:
+        if unconfirmed_names:
             return api_response(
                 code=400,
-                msg=f'以下模块尚未确认: {", ".join(unconfirmed)}',
-                data={'unconfirmed_modules': [int(m.replace("模块", "")) for m in unconfirmed]},
+                msg=f'质量检测报告中以下部分尚未确认: {", ".join(unconfirmed_names)}',
+                data={'unconfirmed_modules': unconfirmed_nums},
                 http_status=400,
             )
 

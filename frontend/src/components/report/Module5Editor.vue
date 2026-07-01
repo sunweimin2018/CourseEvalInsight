@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { Edit } from '@element-plus/icons-vue'
+import ModuleActionBar from './ModuleActionBar.vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { BarChart, ScatterChart } from 'echarts/charts'
@@ -280,7 +281,7 @@ const excelGenerated = computed(() => data.value.excel_generated === true)
 
     <!-- Empty / not-generated state -->
     <div v-if="!excelGenerated">
-      <el-empty description="请先生成课程达成度计算Excel">
+      <el-result icon="warning" title="请先生成课程达成度计算Excel">
         <template #extra>
           <el-alert
             type="warning"
@@ -293,12 +294,12 @@ const excelGenerated = computed(() => data.value.excel_generated === true)
             </template>
           </el-alert>
         </template>
-      </el-empty>
+      </el-result>
     </div>
 
     <!-- Not-generated state (Excel ready but content not generated) -->
     <div v-else-if="!data.generated">
-      <el-empty description="暂无课程目标达成度数据">
+      <el-result icon="info" title="暂无课程目标达成度数据">
         <template #extra>
           <el-alert
             type="info"
@@ -311,7 +312,7 @@ const excelGenerated = computed(() => data.value.excel_generated === true)
             </template>
           </el-alert>
         </template>
-      </el-empty>
+      </el-result>
     </div>
 
     <!-- Generated content -->
@@ -463,13 +464,15 @@ const excelGenerated = computed(() => data.value.excel_generated === true)
       </div>
     </div>
 
-    <div style="margin-top: 24px; display: flex; gap: 8px">
-      <el-button :loading="loading" :disabled="!excelGenerated" @click="emit('regenerate')">
-        <el-icon><Edit /></el-icon> 重新生成
-      </el-button>
-      <el-button type="primary" :loading="loading" :disabled="status === 'confirmed' || !excelGenerated" @click="emit('save')">保存草稿</el-button>
-      <el-button type="success" :loading="loading" :disabled="status === 'confirmed' || !excelGenerated" @click="emit('confirm')">确认</el-button>
-      <el-button :loading="loading" @click="emit('export')">导出Word</el-button>
-    </div>
+    <ModuleActionBar
+      :loading="loading"
+      :regenerate-disabled="!excelGenerated"
+      :save-disabled="status === 'confirmed' || !excelGenerated"
+      :confirm-disabled="status === 'confirmed' || !excelGenerated"
+      @regenerate="emit('regenerate')"
+      @save="emit('save')"
+      @confirm="emit('confirm')"
+      @export="emit('export')"
+    />
   </div>
 </template>

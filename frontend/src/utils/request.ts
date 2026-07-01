@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import { i18n } from '@/i18n'
 
 const request = axios.create({
   baseURL: '/api/v1',
@@ -28,19 +29,34 @@ request.interceptors.request.use((config) => {
 
 request.interceptors.response.use(
   (response) => {
+    // Pass through blob responses (file downloads) without JSON parsing
+    if (response.config.responseType === 'blob') {
+      return response.data
+    }
     const { code, msg, data } = response.data
     if (code === 200) {
       return data
     }
-    ElMessage.error(msg || 'Request failed')
+    ElMessage.error(msg || i18n.global.t('request.failed'))
     return Promise.reject(new Error(msg))
   },
   async (error) => {
     const originalRequest = error.config
 
+    // For blob responses, extract error msg from the blob body
+    let responseData = error.response?.data
+    if (originalRequest.responseType === 'blob' && responseData instanceof Blob) {
+      try {
+        const text = await responseData.text()
+        responseData = JSON.parse(text)
+      } catch {
+        // If parsing fails, keep original blob
+      }
+    }
+
     // Login failures: show server message and reject — never try token refresh
     if (originalRequest.url?.includes('/user/login/')) {
-      const msg = error.response?.data?.msg || 'Login failed'
+      const msg = error.response?.data?.msg || i18n.global.t('request.loginFailed')
       ElMessage.error(msg)
       return Promise.reject(new Error(msg))
     }
@@ -97,7 +113,7 @@ request.interceptors.response.use(
       router.push('/login')
     }
 
-    const msg = error.response?.data?.msg || error.message || 'Network error'
+    const msg = responseData?.msg || error.message || i18n.global.t('request.networkError')
     ElMessage.error(msg)
     return Promise.reject(new Error(msg))
   },

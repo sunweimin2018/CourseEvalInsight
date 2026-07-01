@@ -66,7 +66,10 @@ export interface CourseFileRecord {
   file_type_display: string
   file_name: string
   file_size: number
+  validation_status: 'pending' | 'passed' | 'failed'
   upload_time: string
+  header_warnings?: string[]
+  title_metadata?: Record<string, string>
 }
 
 export function uploadCourseFile(courseId: number, classId: number, semesterName: string, fileType: string, file: File) {
@@ -156,23 +159,91 @@ export function resetWorkingCopy(fileId: number) {
   return request.post(`/excel/course-files/${fileId}/data/reset/`)
 }
 
+// ── Exam status analysis ─────────────────────────────────────────────────────
+
+export interface ExamStatusStudent {
+  name: string
+  student_id: string
+  class_name: string
+  score?: number
+}
+
+export interface ExamStatusGroup {
+  count: number
+  students: ExamStatusStudent[]
+}
+
+export interface ExamStatusResult {
+  has_deferred_col: boolean
+  has_score_col: boolean
+  total: number
+  skipped?: boolean
+  normal: ExamStatusGroup
+  deferred: ExamStatusGroup
+  absent: ExamStatusGroup
+  score_col_name?: string
+  deferred_col_name?: string
+  course_info?: CourseInfoResult | null
+}
+
+export function analyzeExamStatus(courseId: number, classId: number, semesterName: string) {
+  return request.post('/excel/course-files/analyze-exam-status/', {
+    course_id: courseId,
+    class_id: classId,
+    semester_name: semesterName,
+  })
+}
+
 // ── Upload validation ────────────────────────────────────────────────────────
 
 export interface ValidationComparison {
   expected: string
+  percentage?: string
   current: string | null
   match: boolean
+  similarity?: number
+}
+
+export interface StudentComparisonEntry {
+  name: string
+  student_id: string
+  class_name?: string
+}
+
+export interface StudentComparison {
+  matching_count: number
+  only_in_student_info: StudentComparisonEntry[]
+  only_in_grades: StudentComparisonEntry[]
+  key_field: string
+}
+
+export interface CourseInfoComparison {
+  grades_value: string
+  syllabus_value: string
+  match: boolean
+}
+
+export interface CourseInfoResult {
+  match: boolean
+  grades_has_metadata: boolean
+  student_info_has_metadata?: boolean
+  comparisons: {
+    course_code: CourseInfoComparison
+    course_name: CourseInfoComparison
+  }
 }
 
 export interface GradeValidationResult {
   student_count: {
     match: boolean
+    student_id_match: boolean
     student_info_count: number
     grades_count: number
+    comparison?: StudentComparison | null
   }
   header_validation: {
     match: boolean
-    expected_items: string[]
+    expected_items: { name: string; percentage: string }[]
     grade_columns: string[]
     comparisons: ValidationComparison[]
     error?: string
@@ -203,4 +274,19 @@ export function resolveCountMismatch(
 
 export function fixHeaders(fileId: number, mapping: Record<string, string>) {
   return request.post(`/excel/course-files/${fileId}/fix-headers/`, { mapping })
+}
+
+export function forcePassValidation(courseId: number, classId: number, semesterName: string) {
+  return request.post('/excel/course-files/force-pass/', {
+    course_id: courseId,
+    class_id: classId,
+    semester_name: semesterName,
+  })
+}
+
+export function downloadGradesTemplate(courseId: number, classId: number, semesterName: string) {
+  return request.get('/excel/course-files/grades-template/', {
+    params: { course_id: courseId, class_id: classId, semester_name: semesterName },
+    responseType: 'blob',
+  })
 }

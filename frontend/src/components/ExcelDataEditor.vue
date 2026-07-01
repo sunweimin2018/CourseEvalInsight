@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import { Delete, Refresh, Upload } from '@element-plus/icons-vue'
 import type { WorkingData } from '@/api/excel'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   data: WorkingData | null
@@ -59,10 +62,10 @@ function onEditKeyup(e: KeyboardEvent) {
 
 function confirmDelete(pageIdx: number) {
   const absIdx = toAbsolute(pageIdx)
-  ElMessageBox.confirm('确定要删除该行数据吗？此操作不可撤销。', '确认删除', {
+  ElMessageBox.confirm(t('editor.deleteConfirmBody'), t('editor.deleteConfirm'), {
     type: 'warning',
-    confirmButtonText: '删除',
-    cancelButtonText: '取消',
+    confirmButtonText: t('common.delete'),
+    cancelButtonText: t('common.cancel'),
   }).then(() => {
     emit('row-delete', props.fileId, absIdx)
   }).catch(() => {})
@@ -84,10 +87,10 @@ async function handleSave() {
 }
 
 function handleReset() {
-  ElMessageBox.confirm('重置将丢弃所有未保存的修改，恢复为原始文件数据。是否继续？', '确认重置', {
+  ElMessageBox.confirm(t('editor.resetConfirmBody'), t('editor.resetConfirm'), {
     type: 'warning',
-    confirmButtonText: '确认重置',
-    cancelButtonText: '取消',
+    confirmButtonText: t('common.confirm'),
+    cancelButtonText: t('common.cancel'),
   }).then(() => {
     emit('reset', props.fileId)
   }).catch(() => {})
@@ -116,14 +119,14 @@ function cellValue(row: Record<string, unknown>, col: string): string {
             :disabled="!hasUnsavedChanges"
             @click="handleSave"
           >
-            保存
+            {{ $t('editor.save') }}
           </el-button>
           <el-button
             size="small"
             :icon="Refresh"
             @click="handleReset"
           >
-            重置
+            {{ $t('editor.reset') }}
           </el-button>
         </div>
       </div>
@@ -132,9 +135,9 @@ function cellValue(row: Record<string, unknown>, col: string): string {
     <!-- Toolbar -->
     <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center">
       <div style="display: flex; gap: 8px; align-items: center">
-        <el-button type="success" size="small" @click="showAddDialog">新增行</el-button>
-        <el-tag v-if="hasUnsavedChanges" type="warning" size="small">有未保存的修改</el-tag>
-        <el-tag v-else type="info" size="small">已保存</el-tag>
+        <el-button type="success" size="small" @click="showAddDialog">{{ $t('editor.addRow') }}</el-button>
+        <el-tag v-if="hasUnsavedChanges" type="warning" size="small">{{ $t('editor.unsaved') }}</el-tag>
+        <el-tag v-else type="info" size="small">{{ $t('editor.saved') }}</el-tag>
       </div>
       <span style="color: #909399; font-size: 13px">共 {{ data?.total || 0 }} 条</span>
     </div>
@@ -147,10 +150,10 @@ function cellValue(row: Record<string, unknown>, col: string): string {
           <path d="M512 640a48 48 0 1 1 0 96 48 48 0 0 1 0-96z"/>
         </svg>
       </el-icon>
-      <p style="color: #909399; margin-top: 12px">加载中...</p>
+      <p style="color: #909399; margin-top: 12px">{{ $t('editor.loading') }}</p>
     </div>
 
-    <el-empty v-else-if="!data" description="请先选择 Excel 文件" />
+    <el-result v-else-if="!data" icon="info" :title="$t('editor.selectFirst')" />
 
     <template v-else>
       <el-table :data="data.rows" border stripe v-loading="loading" max-height="500" size="small">
@@ -160,7 +163,7 @@ function cellValue(row: Record<string, unknown>, col: string): string {
           :key="h"
           :prop="h"
           :label="h"
-          min-width="140"
+          show-overflow-tooltip
         >
           <template #default="{ row, $index }">
             <div v-if="editingPageIdx === $index && editingCell?.colName === h" style="display: flex; gap: 4px">
@@ -207,7 +210,7 @@ function cellValue(row: Record<string, unknown>, col: string): string {
     </template>
 
     <!-- Add row dialog -->
-    <el-dialog v-model="dialogVisible" title="新增行" width="500px" :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="$t('editor.addRow')" width="500px" :close-on-click-modal="false">
       <el-form label-width="120px">
         <el-form-item
           v-for="h in data?.headers || []"
@@ -218,8 +221,8 @@ function cellValue(row: Record<string, unknown>, col: string): string {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="confirmAddRow">确定新增</el-button>
+        <el-button @click="dialogVisible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="confirmAddRow">{{ $t('editor.addRowTitle') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

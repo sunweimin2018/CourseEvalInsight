@@ -21,7 +21,7 @@ import Module5Editor from '@/components/report/Module5Editor.vue'
 import Module6Editor from '@/components/report/Module6Editor.vue'
 
 const store = useExcelStore()
-const { selection } = storeToRefs(store)
+const { selection, validationStatus } = storeToRefs(store)
 const availableTypes = ref<string[]>([])
 
 // ── Report state ────────────────────────────────────────────────────────────
@@ -77,19 +77,20 @@ watch(selection, async (s) => {
           const preview = await getReportPreview(r.id) as unknown as { report_data: ReportData }
           reportData.value = preview.report_data
         } catch { /* data load failed, user can regenerate */ }
-      } else {
-        // Auto-generate a new report when no existing one is found
+      } else if (validationStatus.value === 'passed') {
+        // Auto-generate a new report only when data is validated
         await ensureReport(true)
       }
     } catch {
-      // no existing report — auto-generate silently
-      try { await ensureReport(true) } catch { /* generation failed */ }
+      if (validationStatus.value === 'passed') {
+        try { await ensureReport(true) } catch { /* generation failed */ }
+      }
     }
   } else {
     store.courseFiles = []
     availableTypes.value = []
   }
-}, { deep: true })
+}, { deep: true, immediate: true })
 
 // ── Report data helpers ─────────────────────────────────────────────────────
 const moduleKeys = ['', 'module_1_course_info', 'module_2_objectives', 'module_3_evaluation_standards', 'module_4_evaluation_results', 'module_5_objective_achievement', 'module_6_improvement_plan'] as const
@@ -118,6 +119,10 @@ const confirmedCount = computed(() => {
   }
   return count
 })
+
+function getModuleTitle(num: number): string {
+  return steps[num - 1]?.title ?? `模块${num}`
+}
 
 function stepStatus(num: number): 'wait' | 'process' | 'finish' | 'error' {
   const s = moduleStatuses.value[num]
@@ -204,9 +209,9 @@ async function handleRegenerate(num: number) {
     const result = await generateModule(reportId.value, num) as { module_data: unknown; module_status: string }
     setModuleData(num, result.module_data)
     moduleStatuses.value[num] = result.module_status
-    ElMessage.success(`模块${num} 生成成功`)
+    ElMessage.success(`质量检测报告中的${getModuleTitle(num)}生成成功`)
   } catch {
-    ElMessage.error(`模块${num} 生成失败`)
+    ElMessage.error(`质量检测报告中的${getModuleTitle(num)}生成失败`)
   } finally {
     actionLoading.value = false
   }
@@ -242,15 +247,7 @@ async function handleConfirm(num: number) {
   try {
     const result = await updateModule(reportId.value, num, data, true) as { module_status: string }
     moduleStatuses.value[num] = result.module_status
-    ElMessage.success(`模块${num} 已确认`)
-
-    // Auto-export after confirm
-    try {
-      await exportModuleDocx(reportId.value, num, `${reportName.value}_模块${num}`)
-      ElMessage.success(`模块${num} Word已导出`)
-    } catch {
-      ElMessage.warning('Word导出失败，请稍后手动导出')
-    }
+    ElMessage.success(`质量检测报告中的${getModuleTitle(num)}已确认`)
   } catch {
     ElMessage.error('确认失败')
   } finally {
@@ -262,7 +259,7 @@ async function handleExportModule(num: number) {
   if (!reportId.value) return
   try {
     await exportModuleDocx(reportId.value, num, `${reportName.value}_模块${num}`)
-    ElMessage.success(`模块${num} Word已导出`)
+    ElMessage.success(`质量检测报告中的${getModuleTitle(num)}Word已导出`)
   } catch {
     ElMessage.error('导出失败')
   }
@@ -362,14 +359,27 @@ function onModuleDataUpdate(num: number, data: unknown) {
             <div style="display: flex; justify-content: space-between; align-items: center">
               <span>{{ label }}</span>
               <el-tag v-if="availableTypes.includes(type)" type="success" size="small">已上传</el-tag>
-              <el-tag v-else type="danger" size="small">未上传</el-tag>
+              <el-tag v-else type="danger" size="small" style="cursor: pointer" @click="$router.push('/excel/upload')">未上传</el-tag>
             </div>
           </el-card>
         </el-col>
       </el-row>
     </el-card>
 
-    <el-empty v-if="!selection.courseId || !selection.classId || !selection.semesterName" description="请先选择课程、班级和学期" />
+    <el-result v-if="!selection.courseId || !selection.classId || !selection.semesterName" icon="info" title="请先选择课程、班级和学期" />
+
+    <!-- Validation gate -->
+    <div v-if="selection.courseId && selection.classId && selection.semesterName && availableTypes.length === 3 && validationStatus !== 'passed'" style="margin-bottom: 20px">
+      <el-card style="border: 2px solid #e6a23c; background: #fdf6ec">
+        <el-result icon="warning" title="数据尚未通过验证" sub-title="请先到文件上传页面完成数据验证，验证通过后方可生成报告">
+          <template #extra>
+            <router-link to="/excel/upload">
+              <el-button type="warning" size="large">前往文件上传页面</el-button>
+            </router-link>
+          </template>
+        </el-result>
+      </el-card>
+    </div>
 
     <!-- Main builder area -->
     <div v-if="selection.courseId && selection.classId && selection.semesterName" style="display: flex; gap: 20px">
@@ -545,7 +555,7 @@ function onModuleDataUpdate(num: number, data: unknown) {
 
           <el-alert
             v-if="!allConfirmed"
-            :title="`还有 ${6 - confirmedCount} 个模块未确认`"
+            :title="`请先确认所有6个模块后再进行合并导出（还有 ${6 - confirmedCount} 个模块未确认）`"
             type="warning"
             show-icon
             :closable="false"
@@ -554,7 +564,7 @@ function onModuleDataUpdate(num: number, data: unknown) {
             <template #default>
               <div v-for="i in 6" :key="i">
                 <el-tag v-if="moduleStatuses[i] !== 'confirmed'" type="danger" size="small" style="margin-right: 8px">
-                  模块{{ i }}: {{ moduleStatuses[i] === 'draft' ? '草稿' : '待生成' }}
+                  {{ steps[i-1].title }}: {{ moduleStatuses[i] === 'draft' ? '草稿' : '待生成' }}
                 </el-tag>
               </div>
             </template>
@@ -578,9 +588,6 @@ function onModuleDataUpdate(num: number, data: unknown) {
             </template>
           </el-result>
 
-          <div v-if="!allConfirmed" style="text-align: center; padding: 40px">
-            <el-empty description="请先确认所有6个模块后再进行合并导出" />
-          </div>
         </el-card>
       </div>
     </div>

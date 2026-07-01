@@ -28,6 +28,7 @@ class CourseFileRecordSerializer(serializers.ModelSerializer):
     class_name = serializers.CharField(source='class_group.name', read_only=True)
     semester_name = serializers.CharField(source='semester.name', read_only=True)
     file_type_display = serializers.CharField(source='get_file_type_display', read_only=True)
+    title_metadata = serializers.JSONField(read_only=True)
 
     class Meta:
         model = CourseFileRecord
@@ -35,7 +36,8 @@ class CourseFileRecordSerializer(serializers.ModelSerializer):
             'id', 'course', 'class_group', 'semester',
             'course_name', 'class_name', 'semester_name',
             'file_type', 'file_type_display', 'file_name',
-            'file_size', 'upload_time',
+            'file_size', 'validation_status', 'upload_time',
+            'title_metadata',
         ]
         read_only_fields = ['id', 'upload_time']
 

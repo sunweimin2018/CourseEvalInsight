@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { Edit } from '@element-plus/icons-vue'
+import ModuleActionBar from './ModuleActionBar.vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { BarChart } from 'echarts/charts'
@@ -59,7 +59,7 @@ function sectionBarChartOption(section: GradeSection): EChartsOption | undefined
 <template>
   <div v-loading.fullscreen.lock="loading" element-loading-text="生成中...">
     <div v-if="!data || !data.generated">
-      <el-empty description="暂无成绩数据，请重新生成" />
+      <el-result icon="warning" title="暂无成绩数据" sub-title="请点击下方「重新生成」按钮生成数据" />
     </div>
     <div v-else>
       <!-- Fallback warning -->
@@ -162,14 +162,16 @@ function sectionBarChartOption(section: GradeSection): EChartsOption | undefined
       </template>
     </div>
 
-    <div style="margin-top: 12px; display: flex; gap: 8px">
-      <el-button :loading="loading" @click="emit('regenerate')">
-        <el-icon><Edit /></el-icon> 重新生成
-      </el-button>
-      <el-button type="primary" :loading="loading" :disabled="status === 'confirmed'" @click="emit('save')">保存草稿</el-button>
-      <el-button type="success" :loading="loading" :disabled="status === 'confirmed'" @click="emit('confirm')">确认</el-button>
-      <el-button :loading="loading" @click="emit('export')">导出Word</el-button>
-    </div>
+    <ModuleActionBar
+      :loading="loading"
+      :regenerate-disabled="readonly"
+      :save-disabled="readonly"
+      :confirm-disabled="readonly"
+      @regenerate="emit('regenerate')"
+      @save="emit('save')"
+      @confirm="emit('confirm')"
+      @export="emit('export')"
+    />
   </div>
 </template>
 

@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useExcelStore } from '@/store/excel'
 import { ElMessage } from 'element-plus'
 import type { SimpleItem } from '@/api/excel'
+
+const { t } = useI18n()
 
 export interface SelectionModel {
   courseId: number | null
@@ -132,8 +135,12 @@ async function reloadFiltered(by: 'course' | 'class' | 'semester') {
 function openAddDialog(type: 'course' | 'class' | 'semester') {
   dialogType.value = type
   dialogInput.value = ''
-  const labels: Record<string, string> = { course: '课程名称', class: '班级', semester: '学期' }
-  dialogTitle.value = '添加新' + labels[type]
+  const labels: Record<string, string> = {
+    course: t('selector.addCourse'),
+    class: t('selector.addClass'),
+    semester: t('selector.addSemester'),
+  }
+  dialogTitle.value = labels[type]
   dialogVisible.value = true
 }
 
@@ -149,7 +156,7 @@ function handleSelectChange(type: 'course' | 'class' | 'semester', value: unknow
 async function confirmAdd() {
   const name = dialogInput.value.trim()
   if (!name) {
-    ElMessage.warning('名称不能为空')
+    ElMessage.warning(t('selector.nameRequired'))
     return
   }
   dialogLoading.value = true
@@ -168,7 +175,7 @@ async function confirmAdd() {
       selectedSemester.value = item.name
     }
     dialogVisible.value = false
-    ElMessage.success('添加成功')
+    ElMessage.success(t('selector.createSuccess'))
   } catch {
     // error handled by interceptor
   } finally {
@@ -214,10 +221,10 @@ onMounted(() => {
   <el-card style="margin-bottom: 20px">
     <el-row :gutter="16">
       <el-col :span="8">
-        <div style="margin-bottom: 4px; font-weight: 500">课程名称</div>
+        <div style="margin-bottom: 4px; font-weight: 500">{{ $t('selector.courseName') }}</div>
         <el-select
           v-model="selectedCourse"
-          placeholder="选择课程"
+          :placeholder="$t('selector.selectCourse')"
           style="width: 100%"
           clearable
           filterable
@@ -225,15 +232,15 @@ onMounted(() => {
         >
           <el-option v-for="c in courseOptions" :key="c.id" :label="c.name" :value="c.id" />
           <el-option value="__add__" style="color: #409eff; font-weight: 500">
-            + 添加新课程
+            + {{ $t('selector.addCourse') }}
           </el-option>
         </el-select>
       </el-col>
       <el-col :span="8">
-        <div style="margin-bottom: 4px; font-weight: 500">班级</div>
+        <div style="margin-bottom: 4px; font-weight: 500">{{ $t('selector.class') }}</div>
         <el-select
           v-model="selectedClass"
-          placeholder="选择班级"
+          :placeholder="$t('selector.selectClass')"
           style="width: 100%"
           clearable
           filterable
@@ -241,15 +248,15 @@ onMounted(() => {
         >
           <el-option v-for="c in classOptions" :key="c.id" :label="c.name" :value="c.id" />
           <el-option value="__add__" style="color: #409eff; font-weight: 500">
-            + 添加新班级
+            + {{ $t('selector.addClass') }}
           </el-option>
         </el-select>
       </el-col>
       <el-col :span="8">
-        <div style="margin-bottom: 4px; font-weight: 500">学期</div>
+        <div style="margin-bottom: 4px; font-weight: 500">{{ $t('selector.semester') }}</div>
         <el-select
           v-model="selectedSemester"
-          placeholder="选择学期"
+          :placeholder="$t('selector.selectSemester')"
           style="width: 100%"
           clearable
           filterable
@@ -262,7 +269,7 @@ onMounted(() => {
             :value="s.value"
           />
           <el-option value="__add__" style="color: #409eff; font-weight: 500">
-            + 添加新学期
+            + {{ $t('selector.addSemester') }}
           </el-option>
         </el-select>
       </el-col>
@@ -277,13 +284,13 @@ onMounted(() => {
     >
       <el-input
         v-model="dialogInput"
-        :placeholder="'请输入' + dialogTitle.replace('添加新', '')"
+        :placeholder="$t('selector.nameRequired')"
         maxlength="100"
         @keyup.enter="confirmAdd"
       />
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="dialogLoading" @click="confirmAdd">确定</el-button>
+        <el-button @click="dialogVisible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="dialogLoading" @click="confirmAdd">{{ $t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

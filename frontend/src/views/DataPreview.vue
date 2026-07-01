@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { useExcelStore } from '@/store/excel'
 import { ElMessage } from 'element-plus'
@@ -9,8 +10,10 @@ import WordDocViewer from '@/components/WordDocViewer.vue'
 import ExcelDataEditor from '@/components/ExcelDataEditor.vue'
 import type { CourseFileRecord } from '@/api/excel'
 
+const { t } = useI18n()
+
 const store = useExcelStore()
-const { selection } = storeToRefs(store)
+const { selection, validationStatus } = storeToRefs(store)
 
 const selectedFileType = ref<'syllabus' | 'student_info' | 'grades' | null>(null)
 const loading = ref(false)
@@ -62,7 +65,7 @@ async function selectFileType(type: 'syllabus' | 'student_info' | 'grades') {
     try {
       await store.fetchWordContent(file.id)
     } catch {
-      ElMessage.error('获取文档内容失败')
+      ElMessage.error(t('common.error'))
     } finally {
       wordLoading.value = false
     }
@@ -73,7 +76,7 @@ async function selectFileType(type: 'syllabus' | 'student_info' | 'grades') {
       await store.openExcel(file.id)
       editorPage.value = 1
     } catch {
-      ElMessage.error('打开文件失败')
+      ElMessage.error(t('common.error'))
     } finally {
       excelLoading.value = false
     }
@@ -85,7 +88,7 @@ async function handleCellUpdate(fileId: number, absRowIdx: number, colName: stri
     await store.updateDataCell(fileId, absRowIdx, colName, value)
     await refreshExcelData(fileId)
   } catch {
-    ElMessage.error('更新单元格失败')
+    ElMessage.error(t('common.error'))
   }
 }
 
@@ -93,9 +96,9 @@ async function handleRowAdd(fileId: number, rowData: Record<string, string>) {
   try {
     await store.addDataRow(fileId, rowData)
     await refreshExcelData(fileId)
-    ElMessage.success('新增成功')
+    ElMessage.success(t('editor.addRowSuccess'))
   } catch {
-    ElMessage.error('新增行失败')
+    ElMessage.error(t('common.error'))
   }
 }
 
@@ -103,18 +106,18 @@ async function handleRowDelete(fileId: number, absRowIdx: number) {
   try {
     await store.deleteDataRowAction(fileId, absRowIdx)
     await refreshExcelData(fileId)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('editor.deleteSuccess'))
   } catch {
-    ElMessage.error('删除行失败')
+    ElMessage.error(t('common.error'))
   }
 }
 
 async function handleSave(fileId: number) {
   try {
     await store.saveChanges(fileId)
-    ElMessage.success('保存成功')
+    ElMessage.success(t('editor.saveSuccess'))
   } catch {
-    ElMessage.error('保存失败')
+    ElMessage.error(t('common.error'))
   }
 }
 
@@ -122,9 +125,9 @@ async function handleReset(fileId: number) {
   try {
     await store.resetChanges(fileId)
     editorPage.value = 1
-    ElMessage.success('已重置为原始数据')
+    ElMessage.success(t('editor.resetSuccess'))
   } catch {
-    ElMessage.error('重置失败')
+    ElMessage.error(t('common.error'))
   }
 }
 
@@ -148,10 +151,23 @@ async function onEditorPageChange(page: number) {
 
 <template>
   <div>
-    <h2 style="margin-bottom: 20px">数据预览</h2>
+    <h2 style="margin-bottom: 20px">{{ $t('preview.title') }}</h2>
 
     <!-- Selectors -->
     <CourseSelectors v-model="selection" />
+
+    <!-- Validation gate warning -->
+    <el-alert
+      v-if="selection.courseId && selection.classId && selection.semesterName && validationStatus !== 'passed'"
+      type="warning"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 20px"
+    >
+      <template #title>
+        <span style="font-weight: 700">{{ $t('preview.notValidated') }}</span>
+      </template>
+    </el-alert>
 
     <!-- File type selection bar -->
     <div
@@ -159,7 +175,7 @@ async function onEditorPageChange(page: number) {
       style="margin-bottom: 20px"
     >
       <el-card v-if="store.courseFiles.length === 0 && !loading">
-        <el-empty description="该课程/班级/学期下暂无已上传文件，请先在文件上传页面完成上传" />
+        <el-result icon="warning" :title="$t('preview.noFiles')" />
       </el-card>
 
       <div v-if="store.courseFiles.length > 0" style="display: flex; gap: 12px; align-items: center">
@@ -174,7 +190,7 @@ async function onEditorPageChange(page: number) {
             <Document v-if="type === 'syllabus'" />
             <DataBoard v-else />
           </el-icon>
-          {{ type === 'syllabus' ? '课程大纲' : type === 'student_info' ? '学生信息' : '成绩表' }}
+          {{ type === 'syllabus' ? $t('preview.fileSyllabus') : type === 'student_info' ? $t('preview.fileStudentInfo') : $t('preview.fileGrades') }}
           <el-tag
             v-if="availableTypes.includes(type)"
             size="small"
@@ -182,7 +198,7 @@ async function onEditorPageChange(page: number) {
             style="margin-left: 8px"
             effect="plain"
           >
-            已上传
+            {{ $t('excel.upload.uploaded') }}
           </el-tag>
         </el-button>
         <router-link
@@ -192,15 +208,16 @@ async function onEditorPageChange(page: number) {
         >
           <el-button type="success">
             <el-icon style="margin-right: 6px"><Edit /></el-icon>
-            生成报告
+            {{ $t('preview.generateReport') }}
           </el-button>
         </router-link>
       </div>
     </div>
 
-    <el-empty
+    <el-result
       v-if="!selection.courseId || !selection.classId || !selection.semesterName"
-      description="请先在上方选择课程、班级和学期"
+      icon="info"
+      :title="$t('excel.upload.selectFirst')"
     />
 
     <!-- Word Document Viewer -->

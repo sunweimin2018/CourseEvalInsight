@@ -24,8 +24,13 @@ urlpatterns = [
     path('course-files/<int:pk>/data/delete-row/', views.DeleteRowView.as_view(), name='course-file-delete-row'),
     path('course-files/<int:pk>/data/save/', views.SaveSnapshotView.as_view(), name='course-file-save'),
     path('course-files/<int:pk>/data/reset/', views.ResetWorkingCopyView.as_view(), name='course-file-reset'),
+    # Exam status analysis (after student_info upload)
+    path('course-files/analyze-exam-status/', views.ExamStatusAnalysisView.as_view(), name='course-file-analyze-exam-status'),
     # Upload validation
     path('course-files/validate-grades/', views.GradesValidationView.as_view(), name='course-file-validate-grades'),
     path('course-files/resolve-mismatch/', views.CountMismatchResolveView.as_view(), name='course-file-resolve-mismatch'),
     path('course-files/<int:pk>/fix-headers/', views.FixHeadersView.as_view(), name='course-file-fix-headers'),
+    path('course-files/force-pass/', views.ForcePassValidationView.as_view(), name='course-file-force-pass'),
+    # Grades template download
+    path('course-files/grades-template/', views.GradesTemplateView.as_view(), name='course-file-grades-template'),
 ]

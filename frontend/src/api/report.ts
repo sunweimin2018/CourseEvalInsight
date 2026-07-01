@@ -1,5 +1,5 @@
-import axios from 'axios'
 import request from '@/utils/request'
+import { downloadBlob } from '@/utils/download'
 
 export interface ReportRecord {
   id: number
@@ -188,24 +188,13 @@ export function getReportPreview(id: number) {
   return request.get(`/report/preview/${id}/`)
 }
 
-export async function downloadReport(id: number, filename: string, format: 'docx' | 'pdf' = 'docx') {
-  const token = localStorage.getItem('access_token')
+export function downloadReport(id: number, filename: string, format: 'docx' | 'pdf' = 'docx') {
   const ext = format === 'pdf' ? '.pdf' : '.docx'
-  const headers: Record<string, string> = {}
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
-  const resp = await axios.get(`/api/v1/report/export/${id}/`, {
-    params: { export_format: format },
-    responseType: 'blob',
-    headers,
-  })
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename.replace(/\.\w+$/, '') + ext
-  a.click()
-  URL.revokeObjectURL(url)
+  return downloadBlob(
+    `/api/v1/report/export/${id}/`,
+    filename.replace(/\.\w+$/, '') + ext,
+    { export_format: format },
+  )
 }
 
 export function getReports(courseId?: number, classId?: number, semesterName?: string) {
@@ -237,48 +226,20 @@ export function updateModule(reportId: number, moduleNum: number, data: unknown,
   })
 }
 
-export async function exportModuleDocx(reportId: number, moduleNum: number, filename: string) {
-  const token = localStorage.getItem('access_token')
-  const headers: Record<string, string> = {}
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
-  const resp = await axios.get(`/api/v1/report/${reportId}/module/${moduleNum}/export-docx/`, {
-    responseType: 'blob',
-    headers,
-  })
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename.replace(/\.\w+$/, '') + '.docx'
-  a.click()
-  URL.revokeObjectURL(url)
+export function exportModuleDocx(reportId: number, moduleNum: number, filename: string) {
+  return downloadBlob(
+    `/api/v1/report/${reportId}/module/${moduleNum}/export-docx/`,
+    filename.replace(/\.\w+$/, '') + '.docx',
+  )
 }
 
-export async function mergeReport(reportId: number, filename: string, format: 'docx' | 'pdf' = 'docx') {
-  const token = localStorage.getItem('access_token')
+export function mergeReport(reportId: number, filename: string, format: 'docx' | 'pdf' = 'docx') {
   const ext = format === 'pdf' ? '.pdf' : '.docx'
-  const headers: Record<string, string> = {}
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
-  const resp = await axios.get(`/api/v1/report/${reportId}/merge/`, {
-    params: { export_format: format },
-    responseType: 'blob',
-    headers,
-  })
-  // Check for error response
-  if (resp.data instanceof Blob && resp.data.type.includes('json')) {
-    const text = await resp.data.text()
-    const parsed = JSON.parse(text)
-    throw new Error(parsed.msg || '合并导出失败')
-  }
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename.replace(/\.\w+$/, '') + ext
-  a.click()
-  URL.revokeObjectURL(url)
+  return downloadBlob(
+    `/api/v1/report/${reportId}/merge/`,
+    filename.replace(/\.\w+$/, '') + ext,
+    { export_format: format },
+  )
 }
 
 // ── Module 5 Excel ──────────────────────────────────────────────────────────
@@ -287,20 +248,6 @@ export function generateAchievementExcel(reportId: number) {
   return request.post(`/report/${reportId}/module/5/generate-excel/`, {}, { timeout: 120000 })
 }
 
-export async function downloadAchievementExcel(reportId: number, filename: string) {
-  const token = localStorage.getItem('access_token')
-  const headers: Record<string, string> = {}
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
-  }
-  const resp = await axios.get(`/api/v1/report/${reportId}/module/5/download-excel/`, {
-    responseType: 'blob',
-    headers,
-  })
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+export function downloadAchievementExcel(reportId: number, filename: string) {
+  return downloadBlob(`/api/v1/report/${reportId}/module/5/download-excel/`, filename)
 }

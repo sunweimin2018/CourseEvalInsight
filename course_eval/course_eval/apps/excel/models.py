@@ -62,6 +62,11 @@ class CourseFileRecord(models.Model):
         ('student_info', '学生基本信息表'),
         ('grades', '学生成绩表'),
     ]
+    VALIDATION_STATUS = [
+        ('pending', '待验证'),
+        ('passed', '验证通过'),
+        ('failed', '验证失败'),
+    ]
 
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='file_records')
     class_group = models.ForeignKey(ClassGroup, on_delete=models.CASCADE, related_name='file_records')
@@ -70,6 +75,8 @@ class CourseFileRecord(models.Model):
     file_name = models.CharField(max_length=255)
     file_path = models.CharField(max_length=500)
     file_size = models.BigIntegerField()
+    validation_status = models.CharField(max_length=20, choices=VALIDATION_STATUS, default='pending')
+    title_metadata = models.JSONField(null=True, blank=True, default=dict, verbose_name='标题行元数据')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='course_file_records')
     upload_time = models.DateTimeField(auto_now_add=True)
 

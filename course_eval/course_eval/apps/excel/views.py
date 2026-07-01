@@ -22,10 +22,55 @@ from .cleaner import clean_and_fuse
 from .word_parser import parse_docx, extract_syllabus_fields
 from . import data_handler
 from . import validation as upload_validation
+from . import grades_template
+
+
+GRADE_KEYWORDS = {'成绩', '分数', '得分', '总评', '平时', '期末', '实验', '作业',
+                  '考勤', '评价', '等级', '考核', '测试', '考试', '期中', '报告'}
+
+
+def _check_upload_headers(file_path, file_type):
+    """Parse the uploaded file and return header warnings if any."""
+    warnings = []
+    try:
+        sheets = parse_excel(file_path)
+        first_sheet = list(sheets.values())[0]
+        headers = first_sheet['headers']
+    except Exception:
+        return warnings
+
+    has_name = any('姓名' in h for h in headers)
+    has_student_id = any('学号' in h for h in headers)
+
+    if file_type == 'student_info':
+        if not has_name:
+            warnings.append('缺少"姓名"列')
+        if not has_student_id:
+            warnings.append('未找到"学号"列')
+    elif file_type == 'grades':
+        if not has_name:
+            warnings.append('缺少"姓名"列')
+        has_grade_col = any(
+            any(kw in h for kw in GRADE_KEYWORDS) for h in headers
+        )
+        if not has_grade_col:
+            warnings.append('未检测到成绩相关列')
+
+    return warnings
 
 
 def _cache_key(user_id, suffix):
     return f'excel_{user_id}_{suffix}'
+
+
+def _get_course_params(data):
+    """Extract and validate course_id, class_id, semester_name from data dict."""
+    course_id = data.get('course_id')
+    class_id = data.get('class_id')
+    semester_name = data.get('semester_name')
+    if not all([course_id, class_id, semester_name]):
+        return None, api_response(code=400, msg='参数不完整', http_status=400)
+    return (course_id, class_id, semester_name), None
 
 
 class ExcelUploadView(APIView):
@@ -267,7 +312,27 @@ class CourseFileUploadView(APIView):
             },
         )
 
+        # Reset validation status for all files in this group
+        CourseFileRecord.objects.filter(
+            course=course, class_group=class_group,
+            semester=semester, user=request.user,
+        ).update(validation_status='pending')
+
+        header_warnings = _check_upload_headers(file_path, data['file_type'])
+
+        # Extract course metadata from the uploaded file's title row
+        try:
+            sheets = parse_excel(file_path)
+            first_sheet = list(sheets.values())[0] if sheets else {}
+            file_metadata = first_sheet.get('metadata')
+            if file_metadata:
+                record.title_metadata = file_metadata
+                record.save(update_fields=['title_metadata'])
+        except Exception:
+            file_metadata = None
+
         out = CourseFileRecordSerializer(record).data
+        out['header_warnings'] = header_warnings
         return api_response(data=out, msg='覆盖上传成功' if not created else '上传成功')
 
 
@@ -323,6 +388,17 @@ class CourseFileDeleteView(APIView):
         if os.path.exists(full_path):
             os.remove(full_path)
         record.delete()
+
+        # Reset validation status on remaining files
+        remaining = CourseFileRecord.objects.filter(
+            course=record.course,
+            class_group=record.class_group,
+            semester=record.semester,
+            user=request.user,
+        )
+        if remaining.exists():
+            remaining.update(validation_status='pending')
+
         return api_response(msg='删除成功')
 
 
@@ -468,15 +544,33 @@ class ResetWorkingCopyView(APIView):
         }, msg='已重置为原始数据')
 
 
+# ── Exam status analysis ──────────────────────────────────────────────────────
+
+class ExamStatusAnalysisView(APIView):
+    def post(self, request):
+        params, err = _get_course_params(request.data)
+        if err:
+            return err
+        course_id, class_id, semester_name = params
+        try:
+            result = upload_validation.analyze_exam_status(
+                request.user, course_id, class_id, semester_name,
+            )
+        except ValueError as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+        except Exception as e:
+            return api_response(code=500, msg=f'分析过程出错：{e}', http_status=500)
+        return api_response(data=result)
+
+
 # ── Upload validation ─────────────────────────────────────────────────────────
 
 class GradesValidationView(APIView):
     def post(self, request):
-        course_id = request.data.get('course_id')
-        class_id = request.data.get('class_id')
-        semester_name = request.data.get('semester_name')
-        if not all([course_id, class_id, semester_name]):
-            return api_response(code=400, msg='参数不完整', http_status=400)
+        params, err = _get_course_params(request.data)
+        if err:
+            return err
+        course_id, class_id, semester_name = params
         try:
             result = upload_validation.validate_grades_upload(
                 request.user, course_id, class_id, semester_name,
@@ -522,3 +616,42 @@ class FixHeadersView(APIView):
         except Exception as e:
             return api_response(code=500, msg=f'修复表头出错：{e}', http_status=500)
         return api_response(data={'headers': new_headers}, msg='表头更新成功')
+
+
+class ForcePassValidationView(APIView):
+    def post(self, request):
+        params, err = _get_course_params(request.data)
+        if err:
+            return err
+        course_id, class_id, semester_name = params
+
+        semester = Semester.objects.filter(name=semester_name, user=request.user).first()
+        if not semester:
+            return api_response(code=400, msg='学期不存在', http_status=400)
+
+        upload_validation._set_file_validation_status(
+            request.user, course_id, class_id, semester, 'syllabus', 'passed')
+        upload_validation._set_file_validation_status(
+            request.user, course_id, class_id, semester, 'student_info', 'passed')
+        upload_validation._set_file_validation_status(
+            request.user, course_id, class_id, semester, 'grades', 'passed')
+
+        return api_response(msg='验证状态已更新')
+
+
+# ── Grades template download ───────────────────────────────────────────────────
+
+class GradesTemplateView(APIView):
+    def get(self, request):
+        params, err = _get_course_params(request.query_params)
+        if err:
+            return err
+        course_id, class_id, semester_name = params
+        try:
+            return grades_template.generate_grades_template(
+                request.user, course_id, class_id, semester_name,
+            )
+        except ValueError as e:
+            return api_response(code=400, msg=str(e), http_status=400)
+        except Exception as e:
+            return api_response(code=500, msg=f'生成模板出错：{e}', http_status=500)

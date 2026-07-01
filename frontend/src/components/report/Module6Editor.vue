@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { Edit } from '@element-plus/icons-vue'
+import ModuleActionBar from './ModuleActionBar.vue'
 import type { Module6Data } from '@/api/report'
 
 const props = defineProps<{
@@ -100,13 +100,15 @@ function emitUpdate() {
       @input="(v: string) => { data.part3 = v; emitUpdate() }"
     />
 
-    <div style="margin-top: 12px; display: flex; gap: 8px">
-      <el-button :loading="loading" @click="emit('regenerate')">
-        <el-icon><Edit /></el-icon> 重新生成
-      </el-button>
-      <el-button type="primary" :loading="loading" :disabled="status === 'confirmed'" @click="emit('save')">保存草稿</el-button>
-      <el-button type="success" :loading="loading" :disabled="status === 'confirmed'" @click="emit('confirm')">确认</el-button>
-      <el-button :loading="loading" @click="emit('export')">导出Word</el-button>
-    </div>
+    <ModuleActionBar
+      :loading="loading"
+      :regenerate-disabled="readonly"
+      :save-disabled="readonly"
+      :confirm-disabled="readonly"
+      @regenerate="emit('regenerate')"
+      @save="emit('save')"
+      @confirm="emit('confirm')"
+      @export="emit('export')"
+    />
   </div>
 </template>

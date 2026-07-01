@@ -25,16 +25,16 @@ async function handleLogin() {
 <template>
   <div class="login-container">
     <div class="login-card" style="padding: 50px 40px 40px">
-      <h2 class="login-title">CourseEvalInsight</h2>
+      <h2 class="login-title">{{ $t('auth.loginTitle') }}</h2>
       <el-form @submit.prevent="handleLogin">
         <el-form-item>
-          <el-input v-model="form.username" placeholder="Username" size="large" clearable />
+          <el-input v-model="form.username" :placeholder="$t('auth.usernamePlaceholder')" size="large" clearable />
         </el-form-item>
         <el-form-item>
           <el-input
             v-model="form.password"
             type="password"
-            placeholder="Password"
+            :placeholder="$t('auth.passwordPlaceholder')"
             size="large"
             show-password
             @keyup.enter="handleLogin"
@@ -42,13 +42,13 @@ async function handleLogin() {
         </el-form-item>
         <el-form-item>
           <el-button type="primary" size="large" style="width: 100%" :loading="loading" @click="handleLogin">
-            Login
+            {{ $t('auth.loginBtn') }}
           </el-button>
         </el-form-item>
       </el-form>
       <div style="text-align: center">
-        Don't have an account?
-        <router-link to="/register">Register</router-link>
+        {{ $t('auth.noAccount') }}
+        <router-link to="/register">{{ $t('auth.register') }}</router-link>
       </div>
     </div>
   </div>
