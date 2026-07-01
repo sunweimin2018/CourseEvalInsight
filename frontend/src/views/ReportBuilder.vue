@@ -343,7 +343,7 @@ function onModuleDataUpdate(num: number, data: unknown) {
 
 <template>
   <div>
-    <h2 style="margin-bottom: 20px">报告构建</h2>
+    <h2 class="page-title">报告构建</h2>
 
     <!-- Course / File status -->
     <CourseSelectors v-model="selection" />

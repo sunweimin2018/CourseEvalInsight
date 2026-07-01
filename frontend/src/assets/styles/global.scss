@@ -1,3 +1,17 @@
+/* ── Element Plus CSS variable overrides ───────────────────────────────── */
+:root {
+  --el-color-primary: #5470e6;
+  --el-color-primary-light-3: #7990ea;
+  --el-color-primary-light-5: #a0b0f0;
+  --el-color-primary-light-7: #c5cff6;
+  --el-color-primary-light-9: #e8ecfb;
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-border-radius-round: 20px;
+  --el-box-shadow-light: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* ── Reset ─────────────────────────────────────────────────────────────── */
 * {
   margin: 0;
   padding: 0;
@@ -10,6 +24,7 @@ html, body, #app {
   font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
+/* ── Login ─────────────────────────────────────────────────────────────── */
 .login-container {
   display: flex;
   justify-content: center;
@@ -23,36 +38,87 @@ html, body, #app {
   width: 400px;
   padding: 40px;
   background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
 }
 
 .login-title {
   text-align: center;
-  font-size: 24px;
+  font-size: 26px;
+  font-weight: 700;
   margin-bottom: 30px;
   color: #303133;
 }
 
-/* 全局表格样式：加深边框、加粗表头 */
+/* ── Page titles ───────────────────────────────────────────────────────── */
+h2.page-title {
+  padding-left: 14px;
+  border-left: 4px solid var(--el-color-primary, #5470e6);
+  font-size: 20px;
+  font-weight: 700;
+  color: #303133;
+  margin-bottom: 20px;
+}
+
+/* ── Card enhancement ──────────────────────────────────────────────────── */
+.el-card {
+  border-radius: 10px;
+  border-color: #e8ecf1;
+  transition: box-shadow 0.3s ease;
+}
+
+.el-card.is-always-shadow,
+.el-card.is-hover-shadow:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+.el-card__header {
+  font-weight: 700;
+  color: #303133;
+  border-bottom-color: #eef1f5;
+}
+
+/* ── Table ─────────────────────────────────────────────────────────────── */
 .el-table--border {
-  border-color: #909399 !important;
+  border-color: #dcdfe6 !important;
 }
 .el-table--border::before,
 .el-table--border::after {
-  background-color: #909399 !important;
+  background-color: #dcdfe6 !important;
 }
 .el-table__inner-wrapper::before,
 .el-table__inner-wrapper::after {
-  background-color: #909399 !important;
+  background-color: #dcdfe6 !important;
 }
 .el-table--border td,
 .el-table--border th {
-  border-color: #909399 !important;
+  border-color: #e4e7ed !important;
 }
 .el-table th {
   font-weight: 700;
+  background: #f5f7fa;
 }
 .el-table .cell {
   font-weight: inherit;
+}
+
+/* ── Button refinements ────────────────────────────────────────────────── */
+.el-button {
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+/* ── Tag refinements ───────────────────────────────────────────────────── */
+.el-tag {
+  font-weight: 600;
+}
+
+/* ── Step refinements ──────────────────────────────────────────────────── */
+.el-step__title {
+  font-weight: 500;
+}
+
+/* ── Menu active item ──────────────────────────────────────────────────── */
+.el-menu-item.is-active {
+  font-weight: 700;
 }

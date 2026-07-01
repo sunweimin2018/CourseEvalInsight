@@ -171,7 +171,7 @@ const fileStatusText: Record<string, string> = {
 
 <template>
   <div>
-    <h2 style="margin-bottom: 20px">Report Generation</h2>
+    <h2 class="page-title">Report Generation</h2>
 
     <CourseSelectors v-model="selection" />
 

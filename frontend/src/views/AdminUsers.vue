@@ -119,7 +119,7 @@ onMounted(() => {
 
 <template>
   <div>
-    <h2 style="margin-bottom: 16px">{{ $t('admin.title') }}</h2>
+    <h2 class="page-title">{{ $t('admin.title') }}</h2>
     <div style="display: flex; justify-content: space-between; margin-bottom: 16px">
       <div style="display: flex; gap: 8px">
         <el-input

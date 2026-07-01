@@ -104,7 +104,7 @@ onMounted(() => {
 
 <template>
   <div style="max-width: 600px; margin: 0 auto">
-    <h2 style="margin-bottom: 24px">{{ $t('user.title') }}</h2>
+    <h2 class="page-title">{{ $t('user.title') }}</h2>
 
     <el-card style="margin-bottom: 24px">
       <template #header>

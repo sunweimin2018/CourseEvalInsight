@@ -529,7 +529,7 @@ async function confirmHeaderEdits() {
 
 <template>
   <div>
-    <h2 style="margin-bottom: 20px">{{ $t('excel.upload.title') }}</h2>
+    <h2 class="page-title">{{ $t('excel.upload.title') }}</h2>
 
     <!-- Selectors -->
     <CourseSelectors v-model="selection" :cascade="false" />

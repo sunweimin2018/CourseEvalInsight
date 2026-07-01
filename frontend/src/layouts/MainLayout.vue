@@ -18,17 +18,17 @@ async function handleLogout() {
 
 <template>
   <el-container style="height: 100%; min-height: 100vh; overflow: hidden">
-    <el-aside width="220px" style="background: #304156; overflow-y: auto; overflow-x: hidden">
+    <el-aside width="220px" style="background: linear-gradient(180deg, #3a4a6b 0%, #263248 100%); overflow-y: auto; overflow-x: hidden">
       <div
-        style="height: 60px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: bold; flex-shrink: 0"
+        style="height: 60px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: bold; flex-shrink: 0; letter-spacing: 1px"
       >
         {{ $t('nav.appTitle') }}
       </div>
       <el-menu
         :default-active="router.currentRoute.value.path"
-        background-color="#304156"
-        text-color="#bfcbd9"
-        active-text-color="#409eff"
+        background-color="transparent"
+        text-color="#c8d6e5"
+        active-text-color="#ffffff"
         router
         style="border-right: none"
       >
@@ -64,7 +64,7 @@ async function handleLogout() {
     </el-aside>
     <el-container style="flex-direction: column; height: 100%">
       <el-header
-        style="display: flex; align-items: center; justify-content: flex-end; background: #fff; border-bottom: 1px solid #e6e6e6; flex-shrink: 0; height: 60px"
+        style="display: flex; align-items: center; justify-content: flex-end; background: #fff; border-bottom: 1px solid #e8ecf1; flex-shrink: 0; height: 60px; box-shadow: 0 1px 4px rgba(0,0,0,0.04)"
       >
         <LangSwitcher style="margin-right: 16px" />
         <el-dropdown>
@@ -85,7 +85,7 @@ async function handleLogout() {
           </template>
         </el-dropdown>
       </el-header>
-      <el-main style="background: #f5f7fa; overflow-y: auto; flex: 1">
+      <el-main style="background: linear-gradient(180deg, #eef1f6 0%, #f5f7fa 100%); overflow-y: auto; flex: 1">
         <router-view />
       </el-main>
     </el-container>

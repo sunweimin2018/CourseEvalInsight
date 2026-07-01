@@ -151,7 +151,7 @@ async function onEditorPageChange(page: number) {
 
 <template>
   <div>
-    <h2 style="margin-bottom: 20px">{{ $t('preview.title') }}</h2>
+    <h2 class="page-title">{{ $t('preview.title') }}</h2>
 
     <!-- Selectors -->
     <CourseSelectors v-model="selection" />
